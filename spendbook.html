@@ -177,6 +177,8 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 /* register */
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .filters input[type=search]{flex:1 1 200px}
+.filters .range{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;color:var(--muted)}
+.filters .range input[type=number]{width:90px}
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:2px 4px 2px 10px;font-size:.82rem}
 .chip button{border:0;background:transparent;color:inherit;padding:0 6px;font-size:1rem;line-height:1}
 .reg{display:flex;flex-direction:column}
@@ -325,6 +327,8 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <input type="search" id="search" placeholder="Search description, account, amount">
       <select id="catFilter" aria-label="Category filter"></select>
       <select id="regAcct" aria-label="Card or account filter"></select>
+      <span class="range"><label for="dateFrom">From</label><input type="date" id="dateFrom"><label for="dateTo">to</label><input type="date" id="dateTo"></span>
+      <span class="range"><label for="amtMin">Amount $</label><input type="number" id="amtMin" min="0" step="0.01" placeholder="min" inputmode="decimal"><label for="amtMax">to</label><input type="number" id="amtMax" min="0" step="0.01" placeholder="max" inputmode="decimal"></span>
       <select id="regSort" aria-label="Sort transactions"><option value="date-desc">Newest first</option><option value="date-asc">Oldest first</option><option value="amt-desc">Largest amount first</option><option value="amt-asc">Smallest amount first</option></select>
       <span id="chips" class="row"></span>
     </div>
@@ -435,7 +439,7 @@ function saveHidden(){ try{ localStorage.setItem("spendbook-hidden", JSON.string
 const S = {
   house:null, houseDb:null, mcp:null, houseBusy:false,
   docs:{}, loaded:false, mode:"memory", fbUser:null, localCopy:null,
-  period:null, account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), catFilter:"", search:"", showN:150,
+  period:null, account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), catFilter:"", search:"", dateFrom:"", dateTo:"", amtMin:null, amtMax:null, showN:150,
   stages:[], sample:null, downloads:null, imgLimits:null,
 };
 const settings = () => Object.assign({currency:guessCurrency(), dateOrder:"auto", rules:[]}, S.docs.settings||{});
@@ -705,20 +709,21 @@ function housePayments(hr){
   const rows = hr.slice().sort((a,b) => (parseInt(String(a.id).slice(1))||0) - (parseInt(String(b.id).slice(1))||0));
   for(let i=0;i<rows.length;i++){
     let sum = 0;
-    for(let j=i;j<rows.length && rows[j].d===rows[i].d;j++){ sum += rows[j].a; out.push({d:rows[i].d, a:Math.round(sum*100)/100}); }
+    for(let j=i;j<rows.length && rows[j].d===rows[i].d;j++){ sum += rows[j].a; out.push({d:rows[i].d, a:Math.round(sum*100)/100, s:rows.slice(i,j+1).map(r=>r.s).join(" + ")}); }
   }
   return out;
 }
 const dayNum = d => Date.UTC(+d.slice(0,4), +d.slice(5,7)-1, +d.slice(8,10)) / 864e5;
-function matchesHousePayment(t, payments){
-  if(t.a < 50) return false;
-  const dn = dayNum(t.d);
-  return payments.some(p => Math.abs(p.a - t.a) < 0.015 && Math.abs(dayNum(p.d) - dn) <= 7);
-}
-/* close to a sheet payment but not an exact match: same size within 3% and within 35 days */
-function looksLikeHousePayment(t, payments){
-  const dn = dayNum(t.d);
-  return payments.some(p => p.a >= 200 && Math.abs(p.a - t.a) <= Math.max(1, p.a*0.03) && Math.abs(dayNum(p.d) - dn) <= 35);
+/* closest sheet payment within 3% and 35 days; exact = same amount to the cent within 7 days */
+function bestHouseMatch(t, payments){
+  const dn = dayNum(t.d); let best = null, bestScore = Infinity;
+  for(const p of payments){
+    const da = Math.abs(p.a - t.a), dd = Math.abs(dayNum(p.d) - dn);
+    if(da > Math.max(1, p.a*0.03) || dd > 35) continue;
+    const score = da / p.a * 100 + dd / 10;
+    if(score < bestScore){ bestScore = score; best = {p, exact: da < 0.015 && dd <= 7}; }
+  }
+  return best;
 }
 /* same merchant, same amount, charged again within 3 days (any card) */
 const repKey = t => t.imp + "|" + t.id;
@@ -746,14 +751,17 @@ function flagRepeats(list){
 function allTxns(){
   const hr = houseRows();
   const docs = isExample() ? exampleDocs() : importDocs().concat(hr.length ? [{id:"house", kind:"import", name:"House cost sheet", account:"House cost sheet", txns:hr}] : []);
-  const covered = hr.length && settings().houseFromSheet !== false;
-  const payments = covered ? housePayments(hr) : [];
+  const payments = hr.length ? housePayments(hr) : [];
   const out = [];
   for(const doc of docs) for(const t of (doc.txns||[])){
     let cat = doc.id === "house" ? "House" : effCat(t);
-    if(covered && doc.id !== "house" && !t.c && (cat === "House" || (t.a > 0 && CAT_KIND[cat] === "spend" && matchesHousePayment(t, payments)))) cat = "In house sheet";
-    const hint = covered && doc.id !== "house" && !t.c && !ruleCat(t) && t.a >= 200 && CAT_KIND[cat] === "spend" && looksLikeHousePayment(t, payments);
-    out.push({...t, acct: t.acct || doc.account || "Unnamed account", src: doc.name, imp: doc.id, cat, hint});
+    /* a card charge that may already be in the house sheet: counted until you confirm it either way */
+    let hm = null;
+    if(hr.length && doc.id !== "house" && !t.c && t.a > 0 && CAT_KIND[cat] === "spend"){
+      const m = t.a >= 50 ? bestHouseMatch(t, payments) : null;
+      if(m || cat === "House") hm = m || {p:null, exact:false};
+    }
+    out.push({...t, acct: t.acct || doc.account || "Unnamed account", src: doc.name, imp: doc.id, cat, hint: !!hm, hm});
   }
   out.sort((a,b) => a.d < b.d ? 1 : a.d > b.d ? -1 : 0);
   flagRepeats(out);
@@ -802,7 +810,7 @@ function renderAll(){
   renderTop(periodTx);
   renderInvest(periodTx);
   renderRecurring(acctTx);
-  renderRegister(periodTx);
+  renderRegister(S.dateFrom || S.dateTo ? acctTx.filter(t => (!S.dateFrom || t.d >= S.dateFrom) && (!S.dateTo || t.d <= S.dateTo)) : periodTx);
   renderImports();
   renderSettings();
 }
@@ -914,7 +922,7 @@ function renderMerchants(list){
 const drcr = a => a < 0 ? `<span class="drcr cr" title="Credit: money in">Cr</span>` : `<span class="drcr db" title="Debit: money out">Db</span>`;
 const catOptions = sel => CAT_NAMES.map(c => `<option ${c===sel?"selected":""}>${esc(c)}</option>`).join("");
 function renderRegister(list){
-  $("#catFilter").innerHTML = `<option value="">All categories</option><option value="__review">Not recognised (in Misc.)</option><option value="__househint">Possible house payments</option><option value="__repeat">Repeated within 3 days</option>` + CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
+  $("#catFilter").innerHTML = `<option value="">All categories</option><option value="__review">Not recognised (in Misc.)</option><option value="__househint">Check against house sheet</option><option value="__repeat">Repeated within 3 days</option>` + CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
   $("#catFilter").value = S.catFilter;
   const racc = [...new Set(list.map(t=>t.acct))].sort();
   if(S.regAcct !== "all" && !racc.includes(S.regAcct)) S.regAcct = "all";
@@ -927,6 +935,8 @@ function renderRegister(list){
   else if(S.catFilter === "__househint") rows = rows.filter(t=>t.hint);
   else if(S.catFilter === "__repeat") rows = rows.filter(t=>t.rep);
   else if(S.catFilter) rows = rows.filter(t=>t.cat===S.catFilter);
+  if(S.amtMin !== null) rows = rows.filter(t => Math.abs(t.a) >= S.amtMin);
+  if(S.amtMax !== null) rows = rows.filter(t => Math.abs(t.a) <= S.amtMax);
   const q = S.search.trim().toLowerCase();
   if(q) rows = rows.filter(t => t.s.toLowerCase().includes(q) || t.acct.toLowerCase().includes(q) || String(t.a).includes(q) || t.cat.toLowerCase().includes(q));
   const [sk, sd] = S.regSort.split("-"), dir = sd === "asc" ? 1 : -1;
@@ -935,16 +945,18 @@ function renderRegister(list){
   const sum = rows.reduce((s,t)=>s+t.a,0);
   const debits = rows.reduce((s,t)=>s+(t.a>0?t.a:0),0), credits = rows.reduce((s,t)=>s+(t.a<0?-t.a:0),0);
   $("#regCount").innerHTML = `${rows.length} ${rows.length===1?"entry":"entries"} · <span class="tot">Debits <b>${money(debits,true)}</b></span> · <span class="tot cr">Credits <b>${money(credits,true)}</b></span> · net ${money(sum,true)}`;
-  $("#chips").innerHTML = (S.catFilter ? `<span class="chip">${esc(S.catFilter==="__review"?"Not recognised":S.catFilter==="__househint"?"Possible house payments":S.catFilter==="__repeat"?"Repeated within 3 days":S.catFilter)}<button data-clear="cat" aria-label="Clear category filter">×</button></span>` : "")
-    + (S.regAcct!=="all" ? `<span class="chip">${esc(S.regAcct)}<button data-clear="acct" aria-label="Clear card filter">×</button></span>` : "");
+  $("#chips").innerHTML = (S.catFilter ? `<span class="chip">${esc(S.catFilter==="__review"?"Not recognised":S.catFilter==="__househint"?"Check against house sheet":S.catFilter==="__repeat"?"Repeated within 3 days":S.catFilter)}<button data-clear="cat" aria-label="Clear category filter">×</button></span>` : "")
+    + (S.regAcct!=="all" ? `<span class="chip">${esc(S.regAcct)}<button data-clear="acct" aria-label="Clear card filter">×</button></span>` : "")
+    + (S.dateFrom || S.dateTo ? `<span class="chip">${S.dateFrom ? shortDate(S.dateFrom) : "Start"} – ${S.dateTo ? shortDate(S.dateTo) : "today"} (instead of the period above)<button data-clear="dates" aria-label="Clear date range">×</button></span>` : "")
+    + (S.amtMin !== null || S.amtMax !== null ? `<span class="chip">${S.amtMin !== null && S.amtMax !== null ? `${money(S.amtMin,true)} – ${money(S.amtMax,true)}` : S.amtMin !== null ? `${money(S.amtMin,true)} and above` : `${money(S.amtMax,true)} and below`}<button data-clear="amt" aria-label="Clear amount filter">×</button></span>` : "");
   const shown = rows.slice(0, S.showN);
   const ex = isExample();
   const ro = t => ex || t.imp === "house";
   const arrow = k => sk === k ? (sd === "asc" ? "▲" : "▼") : "";
   const nUnrec = base.filter(t => isUnsorted(t) && !ro(t)).length, nHint = base.filter(t=>t.hint).length, nIn = base.filter(t=>t.cat==="In house sheet").length, nRep = base.filter(t=>t.rep).length;
   $("#quick").innerHTML = (nRep ? `<button type="button" class="rep ${S.catFilter==="__repeat"?"on":""}" data-quick="__repeat">Repeated within 3 days · ${nRep}</button>` : "") + (nUnrec ? `<button type="button" data-quick="__review" class="${S.catFilter==="__review"?"on":""}">Not recognised · ${nUnrec}</button>` : "")
-    + (nHint ? `<button type="button" class="house ${S.catFilter==="__househint"?"on":""}" data-quick="__househint">Possible house payments · ${nHint}</button>` : "")
-    + (nIn ? `<button type="button" class="house ${S.catFilter==="In house sheet"?"on":""}" data-quick="In house sheet">Left out: already in house sheet · ${nIn}</button>` : "");
+    + (nHint ? `<button type="button" class="house ${S.catFilter==="__househint"?"on":""}" data-quick="__househint">Check against house sheet · ${nHint}</button>` : "")
+    + (nIn ? `<button type="button" class="house ${S.catFilter==="In house sheet"?"on":""}" data-quick="In house sheet">Left out: in house sheet · ${nIn}</button>` : "");
   const keyOf = t => t.imp + "|" + t.id;
   S.shownKeys = shown.filter(t=>!ro(t)).map(keyOf);
   const allOn = S.shownKeys.length && S.shownKeys.every(k=>S.sel.has(k));
@@ -955,7 +967,7 @@ function renderRegister(list){
     <div class="reg-row ${S.sel.has(keyOf(t))?"picked":""}" data-id="${esc(t.id)}" data-imp="${esc(t.imp)}">
       <span class="cb"><input type="checkbox" class="rsel" aria-label="Select" ${S.sel.has(keyOf(t))?"checked":""} ${ro(t)?"disabled":""}></span>
       <span class="d">${shortDate(t.d)}</span>
-      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.hint?` · <span style="color:var(--c-house)">looks like a house payment</span>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote" title="${esc(r.other.s)}">same charge on ${shortDate(r.other.d)} (${esc(r.other.acct)})</span> <button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`).join(""):""}</small></span>
+      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote" title="${esc(r.other.s)}">same charge on ${shortDate(r.other.d)} (${esc(r.other.acct)})</span> <button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`).join(""):""}</small></span>
       <span class="catc"><select aria-label="Category" class="${isUnsorted(t)&&!ro(t)?"other":""}" ${isUnsorted(t)&&!ro(t)?'title="Not recognised: pick the right category"':""} ${ro(t)?"disabled title=\"Edit this in the Google Sheet\"":""}>${catOptions(t.cat)}</select></span>
       <span class="a ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)}${drcr(t.a)}</span>
       <button class="x" aria-label="Delete this transaction" ${ro(t)?"disabled":""}>×</button>
@@ -977,9 +989,9 @@ function houseBlock(){
     <small>${hr.length} entries · ${money(tot)} · ${shortDate(ds[0])} – ${shortDate(ds[ds.length-1])}${h.readAt?` · read ${new Date(h.readAt).toLocaleDateString()}`:""}</small>
     ${skipped.length?`<small style="display:block">Left out: ${skipped.join("; ")}.</small>`:""}
     ${(() => { const inn = TX.filter(t=>t.cat==="In house sheet"), hint = TX.filter(t=>t.hint);
-      return (inn.length ? `<small style="display:block">${inn.length} bank ${inn.length===1?"payment":"payments"} (${money(inn.reduce((s,t)=>s+t.a,0))}) left out because ${inn.length===1?"it’s":"they’re"} already in this sheet. <button class="linkbtn" data-house-show="In house sheet">Show</button></small>` : "")
-        + (hint.length ? `<small style="display:block;color:var(--c-house)">${hint.length} more ${hint.length===1?"looks like a house payment but didn’t":"look like house payments but didn’t"} match exactly. <button class="linkbtn" data-house-show="__househint">Review</button></small>` : ""); })()}
-    <label class="row" style="font-size:.82rem;color:var(--muted);margin-top:4px;gap:6px"><input type="checkbox" id="houseCover" ${settings().houseFromSheet!==false?"checked":""}> Don’t count mortgage and other House payments from bank statements again</label></div>${btn}</div>`;
+      return (hint.length ? `<small style="display:block;color:var(--c-house)">${hint.length} card ${hint.length===1?"charge":"charges"} (${money(hint.reduce((s,t)=>s+t.a,0))}) may already be in this sheet and ${hint.length===1?"is":"are"} counted twice until you check ${hint.length===1?"it":"them"}. <button class="linkbtn" data-house-show="__househint">Review</button></small>` : "")
+        + (inn.length ? `<small style="display:block">${inn.length} card ${inn.length===1?"charge":"charges"} (${money(inn.reduce((s,t)=>s+t.a,0))}) left out because you confirmed ${inn.length===1?"it’s":"they’re"} in this sheet. <button class="linkbtn" data-house-show="In house sheet">Show</button></small>` : ""); })()}
+    </div>${btn}</div>`;
 }
 function renderImports(){
   const docs = importDocs().filter(d => (d.txns||[]).length).sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
@@ -999,7 +1011,7 @@ function renderHowSort(){
     <ol style="margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px">
       <li><b>A category you picked</b> for that transaction (one at a time or in bulk).</li>
       <li><b>Your rules</b> above, e.g. “kumon” → Misc.</li>
-      <li><b>House cost sheet rows</b> are always House. With the sheet loaded, a bank debit is marked <b>In house sheet</b> if it names a mortgage lender or property tax, or matches a sheet payment’s amount within 7 days. Near-misses (within 3%, about a month) are only flagged.</li>
+      <li><b>House cost sheet rows</b> are always House. With the sheet loaded, a card or bank charge that is a House cost, or within 3% and about a month of a sheet payment, is flagged <b>Check against house sheet</b> and still counted. Nothing is left out until you choose <b>Same payment: leave out</b>, which moves it to <b>In house sheet</b>.</li>
       <li><b>Transfers</b> (left out of every total): ${kw("Transfers")}.</li>
       <li><b>Card bill payments</b>: on a card statement (money in) they’re Transfers; paid out of checking they stay <b>Not recognised</b> so you can sort them yourself. Words: ${kw("Card payments")}.</li>
       <li><b>Money in</b>: pay and interest go to Income (${kw("Income")}); refunds and cashback reduce the category they came from; brokerage withdrawals go to Investments; any other credit counts as Income.</li>
@@ -1059,7 +1071,10 @@ $("#legend").addEventListener("click", e => {
 });
 $("#incomeRow").addEventListener("click", e => { const b = e.target.closest(".cat-row"); if(!b) return; S.catFilter = S.catFilter==="Income" ? "" : "Income"; S.showN=150; renderAll(); $("#register").scrollIntoView({block:"start"}); });
 $("#cats").addEventListener("click", e => { const b = e.target.closest(".cat-row"); if(!b) return; S.catFilter = S.catFilter===b.dataset.cat ? "" : b.dataset.cat; S.showN=150; renderAll(); $("#register").scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth", block:"start"}); });
-$("#chips").addEventListener("click", e => { const c = e.target.dataset.clear; if(c==="cat") S.catFilter=""; if(c==="acct") S.regAcct="all"; if(c) renderAll(); });
+$("#chips").addEventListener("click", e => { const c = e.target.dataset.clear; if(c==="cat") S.catFilter=""; if(c==="acct") S.regAcct="all";
+  if(c==="dates"){ S.dateFrom = S.dateTo = ""; $("#dateFrom").value = $("#dateTo").value = ""; }
+  if(c==="amt"){ S.amtMin = S.amtMax = null; $("#amtMin").value = $("#amtMax").value = ""; }
+  if(c) renderAll(); });
 $("#quick").addEventListener("click", e => { const b = e.target.closest("[data-quick]"); if(!b) return; S.catFilter = S.catFilter===b.dataset.quick ? "" : b.dataset.quick; S.showN=150; renderAll(); });
 $("#bulkClear").onclick = () => { S.sel.clear(); renderAll(); };
 $("#bulkApply").onclick = () => {
@@ -1082,6 +1097,16 @@ $("#bulkApply").onclick = () => {
 };
 $("#regSort").onchange = e => { S.regSort = e.target.value; renderAll(); };
 $("#reg").addEventListener("click", e => {
+  const hb = e.target.closest("[data-hm]");
+  if(hb){
+    const row = hb.closest(".reg-row"), f = findTxn(row.dataset.imp, row.dataset.id); if(!f) return;
+    const before = structuredClone(f.doc), doc = structuredClone(f.doc), t = doc.txns[f.i];
+    const same = hb.dataset.hm === "same";
+    t.c = same ? "In house sheet" : effCat(t);
+    putDoc(row.dataset.imp, doc);
+    toast(same ? `Left out: ${money(t.a,true)} is already in the house sheet.` : `Kept as ${t.c}.`, () => putDoc(row.dataset.imp, before), "Undo");
+    return;
+  }
   const nd = e.target.closest("[data-notdup]");
   if(nd){ const pk = nd.dataset.notdup; saveSettings({notDup:(settings().notDup||[]).concat(pk)}); toast("Marked as not a duplicate.", () => saveSettings({notDup:(settings().notDup||[]).filter(x=>x!==pk)}), "Undo"); }
 });
@@ -1093,6 +1118,10 @@ $("#regAcct").onchange = e => { S.regAcct = e.target.value; S.showN=150; renderA
 $("#catFilter").onchange = e => { S.catFilter = e.target.value; S.showN=150; renderAll(); };
 $("#period").onchange = e => { S.period = e.target.value; S.showN=150; renderAll(); };
 $("#acctFilter").onchange = e => { S.account = e.target.value; renderAll(); };
+$("#dateFrom").onchange = e => { S.dateFrom = e.target.value; S.showN=150; renderAll(); };
+$("#dateTo").onchange = e => { S.dateTo = e.target.value; S.showN=150; renderAll(); };
+let aT; const amtVal = v => v.trim()==="" || isNaN(+v) ? null : Math.abs(+v);
+$("#amtMin").oninput = $("#amtMax").oninput = () => { clearTimeout(aT); aT = setTimeout(()=>{ S.amtMin = amtVal($("#amtMin").value); S.amtMax = amtVal($("#amtMax").value); S.showN=150; renderAll(); }, 250); };
 let sT; $("#search").oninput = e => { clearTimeout(sT); sT = setTimeout(()=>{ S.search = e.target.value; S.showN=150; renderAll(); }, 150); };
 $("#moreBtn").onclick = () => { S.showN += 300; renderAll(); };
 $("#imports").addEventListener("click", e => {
@@ -1349,7 +1378,6 @@ $("#imports").addEventListener("click", e => {
   if(e.target.closest("#houseRefresh")) refreshHouse();
   const hs = e.target.closest("[data-house-show]"); if(hs){ S.catFilter = hs.dataset.houseShow; S.period = "all"; S.showN = 150; renderAll(); $("#register").scrollIntoView({block:"start"}); }
 });
-$("#imports").addEventListener("change", e => { if(e.target.id === "houseCover") saveSettings({houseFromSheet: e.target.checked}); });
 
 /* ---------- export ---------- */
 $("#exportBtn").onclick = async () => {
