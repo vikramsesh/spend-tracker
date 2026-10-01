@@ -6,7 +6,7 @@ A personal spend tracker in a single HTML file. Upload bank and credit card stat
 
 - **Statement import**: CSV, `.xls`/`.xlsx` and PDF (including password-protected PDFs), read in the browser. Columns are detected automatically and can be adjusted before importing. Duplicate rows are skipped.
 - **Card picker**: each statement is tagged with the card or account it came from (Amex Gold Delta, Chase Sapphire, Chase Freedom Unlimited, Chase checking, Amex Blue Cash, Costco Citi Advantage, or another name).
-- **Categories**: House, Groceries, Gas + Costco, Travel, Dining Out + Entertainment, Utilities and Misc., plus Income, Investments and Transfers, which are kept out of spend. Unrecognised merchants are flagged for review. Settings → *How sorting works* lists every keyword.
+- **Categories**: House, Car, Groceries, Gas + Costco, Travel, Dining Out + Entertainment, Utilities and Misc., plus Income, Investments and Transfers, which are kept out of spend. Unrecognised merchants are flagged for review. Settings → *How sorting works* lists every keyword.
 - **Rules and bulk editing**: change one transaction or many at once, and optionally remember the choice for that merchant.
 - **House cost sheet**: reads the "House cost" tab of a Google Sheet through the Google Drive connector. Bank payments that repeat a sheet entry are marked *In house sheet* and not counted twice.
 - **Dashboards**: overall spend by category, a monthly chart with toggles for each category and an income line, spend by card, top merchants, and the 3 biggest costs in each category.

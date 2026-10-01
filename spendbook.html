@@ -19,14 +19,14 @@
   --f-body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --f-mono:"IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
   --r:10px;
-  --c-house:#5A4A8C; --c-groc:#2D7A4C; --c-gas:#B8740F; --c-travel:#2C6CAE; --c-dine:#C0443A; --c-util:#17898A; --c-misc:#7B8088; --c-income:#2C5C9B; --c-inv:#7A5A12;
+  --c-house:#5A4A8C; --c-car:#A3427A; --c-groc:#2D7A4C; --c-gas:#B8740F; --c-travel:#2C6CAE; --c-dine:#C0443A; --c-util:#17898A; --c-misc:#7B8088; --c-income:#2C5C9B; --c-inv:#7A5A12;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0F1412; --surface:#161D1A; --sunk:#1D2622; --line:#2B3631; --fg:#E2E9E4; --muted:#92A097;
-  --accent:#5CBB8E; --accent-soft:#1E3B2F; --credit:#86ABE2; --warn:#E3A45A; --danger:#EE7F72; --c-house:#A695DB; --c-groc:#6CC08E; --c-gas:#E7AA4C; --c-travel:#72A9E6; --c-dine:#EE857A; --c-util:#5CCAC7; --c-misc:#A2A9B0; --c-income:#86ABE2; --c-inv:#D9B35E; color-scheme:dark}}
+  --accent:#5CBB8E; --accent-soft:#1E3B2F; --credit:#86ABE2; --warn:#E3A45A; --danger:#EE7F72; --c-house:#A695DB; --c-car:#E08BBF; --c-groc:#6CC08E; --c-gas:#E7AA4C; --c-travel:#72A9E6; --c-dine:#EE857A; --c-util:#5CCAC7; --c-misc:#A2A9B0; --c-income:#86ABE2; --c-inv:#D9B35E; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0F1412; --surface:#161D1A; --sunk:#1D2622; --line:#2B3631; --fg:#E2E9E4; --muted:#92A097;
-  --accent:#5CBB8E; --accent-soft:#1E3B2F; --credit:#86ABE2; --warn:#E3A45A; --danger:#EE7F72; --c-house:#A695DB; --c-groc:#6CC08E; --c-gas:#E7AA4C; --c-travel:#72A9E6; --c-dine:#EE857A; --c-util:#5CCAC7; --c-misc:#A2A9B0; --c-income:#86ABE2; --c-inv:#D9B35E; color-scheme:dark}
+  --accent:#5CBB8E; --accent-soft:#1E3B2F; --credit:#86ABE2; --warn:#E3A45A; --danger:#EE7F72; --c-house:#A695DB; --c-car:#E08BBF; --c-groc:#6CC08E; --c-gas:#E7AA4C; --c-travel:#72A9E6; --c-dine:#EE857A; --c-util:#5CCAC7; --c-misc:#A2A9B0; --c-income:#86ABE2; --c-inv:#D9B35E; color-scheme:dark}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--f-body);margin:0}
@@ -164,6 +164,7 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 .quick button.rep{border-color:var(--danger);color:var(--danger)}
 .quick button.rep.on{background:var(--danger);color:var(--surface);border-style:solid}
 .repnote{color:var(--danger)}
+#regCount .tot b{color:var(--fg);font-weight:600} #regCount .tot.cr b{color:var(--credit)}
 .empty{color:var(--muted);font-size:.92rem;padding:10px 0}
 /* trend */
 .trend svg{width:100%;height:auto;display:block}
@@ -256,7 +257,6 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <label class="sr" for="period" hidden>Period</label>
       <select id="period" aria-label="Period"></select>
       <select id="acctFilter" aria-label="Account"></select>
-      <button class="btn" id="addBtn">+ Add a spend</button>
       <button class="btn primary" id="uploadBtn">Upload statements</button>
     </div>
   </header>
@@ -380,21 +380,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
   </div>
 </div>
 
-<div class="overlay" id="adder" hidden>
-  <form class="sheet narrow" id="addForm" role="dialog" aria-modal="true" aria-labelledby="addTitle">
-    <div class="sheet-head"><h2 id="addTitle">Add a spend</h2><button type="button" class="btn ghost" data-close="adder" aria-label="Close">✕</button></div>
-    <div class="seg" id="addDir"><button type="button" data-v="out" class="on">Money out</button><button type="button" data-v="in">Money in</button></div>
-    <label class="field"><span>What for</span><input type="text" id="addDesc" required placeholder="Farmers market, parking meter"></label>
-    <div class="settings-grid">
-      <label class="field"><span>Amount</span><input type="number" id="addAmt" step="0.01" min="0.01" required></label>
-      <label class="field"><span>Date</span><input type="date" id="addDate" required></label>
-      <label class="field"><span>Category</span><select id="addCat"></select></label>
-      <label class="field"><span>Paid with</span><input type="text" id="addAcct" list="acctList" value="Cash"></label>
-    </div>
-    <datalist id="acctList"></datalist>
-    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close="adder">Cancel</button><button class="btn primary" type="submit">Add</button></div>
-  </form>
-</div>
+<datalist id="acctList"></datalist>
 
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
@@ -403,14 +389,14 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
 "use strict";
 /* ---------- categories ---------- */
 const CATS = [
-  ["House","spend"],["Groceries","spend"],["Gas + Costco","spend"],["Travel","spend"],
+  ["House","spend"],["Car","spend"],["Groceries","spend"],["Gas + Costco","spend"],["Travel","spend"],
   ["Dining Out + Entertainment","spend"],["Utilities","spend"],["Misc.","spend"],
   ["Investments","invest"],["Income","in"],["Transfers","transfer"],["In house sheet","transfer"]
 ];
 const CAT_KIND = Object.fromEntries(CATS);
 const CAT_NAMES = CATS.map(c => c[0]);
 const SPEND_CATS = CATS.filter(c => c[1]==="spend").map(c => c[0]);
-const CAT_COLOR = {"House":"var(--c-house)","Groceries":"var(--c-groc)","Gas + Costco":"var(--c-gas)","Travel":"var(--c-travel)","Dining Out + Entertainment":"var(--c-dine)","Utilities":"var(--c-util)","Misc.":"var(--c-misc)","Income":"var(--c-income)","Investments":"var(--c-inv)"};
+const CAT_COLOR = {"House":"var(--c-house)","Car":"var(--c-car)","Groceries":"var(--c-groc)","Gas + Costco":"var(--c-gas)","Travel":"var(--c-travel)","Dining Out + Entertainment":"var(--c-dine)","Utilities":"var(--c-util)","Misc.":"var(--c-misc)","Income":"var(--c-income)","Investments":"var(--c-inv)"};
 /* older category names (saved overrides and rules) map onto the new groups */
 const LEGACY = {"Food & dining":"Dining Out + Entertainment","Entertainment":"Dining Out + Entertainment","Subscriptions":"Dining Out + Entertainment","Transport":"Travel","Bills & utilities":"Utilities","Rent & housing":"House","Shopping":"Misc.","Health":"Misc.","Education":"Misc.","Insurance":"Misc.","EMI & loans":"Misc.","Fees & charges":"Misc.","Cash withdrawal":"Misc.","Personal care":"Misc.","Gifts & donations":"Misc.","Other":"Misc."};
 const normCat = c => LEGACY[c] || (CAT_KIND[c] ? c : "Misc.");
@@ -421,12 +407,13 @@ const KW = {
   "Investments":["vanguard","robinhood","fidelity","etrade","e*trade","schwab","wealthfront","betterment","m1 finance","acorns","merrill","zerodha","groww","upstox","mutual fund","sip ","coinbase"],
   "Income":["payroll","salary","direct dep","dir dep","dividend","interest paid","interest payment","int pd","bonus","irs treas","tax ref"],
   "House":["mortgage","home loan","hoa","homeowners assoc","property tax","prop tax","rent payment","rent pmt","monthly rent","apt rent","landlord","escrow","home depot","lowe's","lowes","rocket mortgage","wells fargo home","mr. cooper","mr cooper","newrez","loancare","pennymac","shellpoint","freedom mortgage","mortgage serv","united wholesale","uwm","crosscountry","guild mortgage","loan servicing","dovenmuehle","cenlar","flagstar","nationstar","mtg pymt","mtg pmt","mortgage pmt","mortgage payment","home loan pmt","chase mortgage","chase home lending","us bank home","bank of america mortgage","truist mortgage","citizens mortgage","santander mortgage"],
+  "Car":["car loan","auto loan","toyota financial","toyota motor credit","honda financial","american honda","ford credit","tesla","gm financial","ally auto","capital one auto","carmax","geico","auto insurance","car insurance","car wash","carwash","dmv","dept of licensing","vehicle registration","vehicle reg","jiffy lube","valvoline","oil change","auto repair","auto service","auto body","collision","auto parts","autozone","o'reilly auto","oreilly auto","napa auto","pep boys","discount tire","les schwab","firestone","midas","meineke","smog"],
   "Gas + Costco":["costco","shell","chevron","exxon","mobil","arco","valero","speedway","circle k","sunoco","marathon","citgo","phillips 66","conoco","texaco","76 ","wawa","sheetz","quiktrip","racetrac","kwik","maverik","fuel","gas station","petro","bp#","bp "," sams club","sam's club","hpcl","bpcl","iocl","indian oil","petrol"],
   "Groceries":["trader joe","whole foods","wholefds","safeway","kroger","aldi","sprouts","h-e-b","heb ","publix","wegmans","qfc","fred meyer","fred-meyer","albertsons","vons","ralphs","food lion","giant","stop & shop","harris teeter","meijer","hy-vee","winco","smart & final","lucky","patel brothers","patel bros","indian grocery","india bazaar","h mart","hmart","99 ranch","instacart","grocery","grocer","supermarket","market basket","bigbasket","blinkit","zepto","instamart","dmart","walmart grocery","amazon fresh","fresh market"],
   "Travel":["airline","airlines","airways","air lines","delta air","united air","american air","aa.com","alaska air","southwest","jetblue","spirit air","frontier","hawaiian","air canada","air india","emirates","lufthansa","british a","qatar","expedia","booking.com","priceline","kayak","hotels.com","airbnb","vrbo","marriott","hilton","hyatt","ihg","holiday inn","hampton","sheraton","westin","best western","motel","hotel","inn ","resort","hertz","avis","enterprise rent","budget rent","national car","alamo","sixt","turo","thrifty","dollar rent","car rental","amtrak","greyhound","uber","lyft","taxi","parking","toll","tsa ","clear ","global entry","makemytrip","goibibo","cleartrip","indigo"],
   "Dining Out + Entertainment":["restaurant","grill","bistro","kitchen","cafe","café","coffee","starbucks","dunkin","peet","mcdonald","burger","pizza","domino","taco","chipotle","panera","subway","chick-fil","wendy","kfc","panda express","five guys","in-n-out","shake shack","sweetgreen","cava","sushi","ramen","thai","bar ","pub","brewery","tavern","wine","doordash","uber eats","ubereats","grubhub","postmates","caviar","bakery","dessert","ice cream","boba","netflix","hulu","disney","hbo","max.com","spotify","youtube","apple.com/bill","prime video","paramount","peacock","amc ","regal","cinemark","cinema","movie","fandango","ticketmaster","stubhub","eventbrite","concert","theater","theatre","bowling","golf","topgolf","museum","zoo","steam","playstation","xbox","nintendo","swiggy","zomato"],
   "Utilities":["electric","energy","power","pg&e","pge","pse ","puget sound","con ed","coned","duke energy","dominion","xcel","southern california edison","sce ","sdg&e","water","sewer","garbage","waste management","recology","republic services","natural gas","gas company","socalgas","comcast","xfinity","spectrum","cox comm","optimum","frontier comm","centurylink","ziply","google fi","at&t","att*","verizon","t-mobile","tmobile","mint mobile","visible","cricket","internet","wireless","utility","utilities","city of"],
-  "Misc.":["amazon","amzn","target","walmart","ebay","etsy","best buy","apple store","ikea","macy","nordstrom","tj maxx","marshalls","ross","old navy","gap ","nike","insurance","geico","progressive","state farm","allstate","farmers ins","liberty mutual","usaa","lemonade","car loan","auto loan","auto pay","toyota financial","toyota motor credit","honda financial","american honda","ford credit","tesla","gm financial","ally auto","capital one auto","carmax","cvs","walgreens","pharmacy","doctor","dental","clinic","hospital","gym","fitness","salon","barber","fee","interest charge","late fee"],
+  "Misc.":["amazon","amzn","target","walmart","ebay","etsy","best buy","apple store","ikea","macy","nordstrom","tj maxx","marshalls","ross","old navy","gap ","nike","insurance","progressive","state farm","allstate","farmers ins","liberty mutual","usaa","lemonade","auto pay","cvs","walgreens","pharmacy","doctor","dental","clinic","hospital","gym","fitness","salon","barber","fee","interest charge","late fee"],
 };
 const REFUND_WORDS = ["refund","reversal","reversed","cashback","cash back","rfnd","chargeback"];
 
@@ -524,7 +511,7 @@ function detectOrder(values){
 const kwRe = list => new RegExp("(?:^|[^a-z0-9])(?:" + list.map(k => k.trim().replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|") + ")");
 const KW_RE = Object.fromEntries(Object.entries(KW).map(([c,l]) => [c, kwRe(l)]));
 const REFUND_RE = kwRe(REFUND_WORDS);
-const SPEND_ORDER = ["House","Gas + Costco","Groceries","Dining Out + Entertainment","Travel","Utilities","Misc."];
+const SPEND_ORDER = ["House","Car","Gas + Costco","Groceries","Dining Out + Entertainment","Travel","Utilities","Misc."];
 /* returns a category, or null when no keyword matched */
 function builtinCat(desc, amt){
   const s = String(desc).toLowerCase().replace(/[\/_|]+/g," ");
@@ -946,7 +933,8 @@ function renderRegister(list){
   rows = rows.slice().sort((a,b) => sk === "amt" ? (Math.abs(a.a) - Math.abs(b.a)) * dir || (a.d < b.d ? 1 : -1) : (a.d < b.d ? -1 : a.d > b.d ? 1 : 0) * dir || Math.abs(b.a) - Math.abs(a.a));
   $("#regSort").value = S.regSort;
   const sum = rows.reduce((s,t)=>s+t.a,0);
-  $("#regCount").textContent = `${rows.length} ${rows.length===1?"entry":"entries"} · net ${money(sum,true)}`;
+  const debits = rows.reduce((s,t)=>s+(t.a>0?t.a:0),0), credits = rows.reduce((s,t)=>s+(t.a<0?-t.a:0),0);
+  $("#regCount").innerHTML = `${rows.length} ${rows.length===1?"entry":"entries"} · <span class="tot">Debits <b>${money(debits,true)}</b></span> · <span class="tot cr">Credits <b>${money(credits,true)}</b></span> · net ${money(sum,true)}`;
   $("#chips").innerHTML = (S.catFilter ? `<span class="chip">${esc(S.catFilter==="__review"?"Not recognised":S.catFilter==="__househint"?"Possible house payments":S.catFilter==="__repeat"?"Repeated within 3 days":S.catFilter)}<button data-clear="cat" aria-label="Clear category filter">×</button></span>` : "")
     + (S.regAcct!=="all" ? `<span class="chip">${esc(S.regAcct)}<button data-clear="acct" aria-label="Clear card filter">×</button></span>` : "");
   const shown = rows.slice(0, S.showN);
@@ -1404,31 +1392,10 @@ $("#claudeCatBtn").onclick = async () => {
   }finally{ btn.disabled = false; btn.textContent = "Ask Claude to sort unrecognised"; }
 };
 
-/* ---------- add by hand ---------- */
-let addDir = "out";
-$("#addBtn").onclick = openAdd;
-function openAdd(){
-  $("#addDate").value = new Date().toISOString().slice(0,10);
-  $("#addCat").innerHTML = catOptions("Misc.");
-  $("#adder").hidden = false; $("#addDesc").focus();
-}
-$("#addDir").onclick = e => { const b = e.target.closest("button"); if(!b) return; addDir = b.dataset.v; [...$("#addDir").children].forEach(x=>x.classList.toggle("on", x===b)); $("#addCat").value = addDir==="in" ? "Income" : "Misc."; };
-$("#addDesc").addEventListener("input", e => { if(addDir==="out"){ const c = builtinCat(e.target.value, 1); if(c) $("#addCat").value = c; } });
-$("#addForm").onsubmit = e => {
-  e.preventDefault();
-  const amt = parseFloat($("#addAmt").value); if(!(amt>0)) return;
-  const doc = structuredClone(S.docs.manual || {kind:"import", name:"Added by hand", account:"Cash", createdAt:new Date().toISOString(), txns:[]});
-  const t = {id:rid(), d:$("#addDate").value, s:$("#addDesc").value.trim(), a: addDir==="in" ? -amt : amt, acct: $("#addAcct").value.trim() || "Cash"};
-  const cat = $("#addCat").value; if(cat !== (builtinCat(t.s, t.a) || "Misc.")) t.c = cat;
-  doc.txns.push(t); putDoc("manual", doc);
-  $("#adder").hidden = true; $("#addForm").reset(); addDir="out"; [...$("#addDir").children].forEach((x,i)=>x.classList.toggle("on", i===0));
-  toast(`Added ${money(amt,true)} · ${cat}.`);
-};
-
 /* ---------- overlays ---------- */
 document.addEventListener("click", e => { const c = e.target.closest("[data-close]"); if(c) $("#"+c.dataset.close).hidden = true; });
-document.addEventListener("keydown", e => { if(e.key==="Escape"){ $("#importer").hidden = true; $("#adder").hidden = true; } });
-[$("#importer"), $("#adder")].forEach(o => o.addEventListener("mousedown", e => { if(e.target===o) o.hidden = true; }));
+document.addEventListener("keydown", e => { if(e.key==="Escape"){ $("#importer").hidden = true; } });
+[$("#importer")].forEach(o => o.addEventListener("mousedown", e => { if(e.target===o) o.hidden = true; }));
 $("#uploadBtn").onclick = $("#bannerUpload").onclick = () => { $("#importer").hidden = false; };
 
 /* ---------- import: files ---------- */
