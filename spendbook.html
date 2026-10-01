@@ -161,6 +161,9 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 .rec-table td small{display:block;color:var(--muted);font-size:.76rem}
 .flag{display:inline-block;font-size:.72rem;border-radius:4px;padding:0 6px;margin-left:6px;border:1px solid currentColor}
 .flag.up{color:var(--danger)} .flag.late{color:var(--warn)}
+.quick button.rep{border-color:var(--danger);color:var(--danger)}
+.quick button.rep.on{background:var(--danger);color:var(--surface);border-style:solid}
+.repnote{color:var(--danger)}
 .empty{color:var(--muted);font-size:.92rem;padding:10px 0}
 /* trend */
 .trend svg{width:100%;height:auto;display:block}
@@ -730,6 +733,29 @@ function looksLikeHousePayment(t, payments){
   const dn = dayNum(t.d);
   return payments.some(p => p.a >= 200 && Math.abs(p.a - t.a) <= Math.max(1, p.a*0.03) && Math.abs(dayNum(p.d) - dn) <= 35);
 }
+/* same merchant, same amount, charged again within 3 days (any card) */
+const repKey = t => t.imp + "|" + t.id;
+const pairKey = (a, b) => [repKey(a), repKey(b)].sort().join("~");
+function flagRepeats(list){
+  const ok = new Set(settings().notDup || []);
+  const groups = {};
+  for(const t of list){
+    if(t.imp === "house" || t.imp === "example" || t.a <= 0 || CAT_KIND[t.cat] === "transfer") continue;
+    /* first word of the merchant only: banks add store numbers and cities differently */
+    const k = Math.round(t.a*100) + "|" + merchantKey(t.s).split(" ")[0];
+    (groups[k] = groups[k] || []).push(t);
+  }
+  for(const g of Object.values(groups)){
+    if(g.length < 2) continue;
+    g.sort((a,b) => a.d.localeCompare(b.d));
+    for(let i=0;i<g.length;i++) for(let j=i+1;j<g.length;j++){
+      if(dayNum(g[j].d) - dayNum(g[i].d) > 3) break;
+      const pk = pairKey(g[i], g[j]); if(ok.has(pk)) continue;
+      (g[i].rep = g[i].rep || []).push({pk, other:g[j]});
+      (g[j].rep = g[j].rep || []).push({pk, other:g[i]});
+    }
+  }
+}
 function allTxns(){
   const hr = houseRows();
   const docs = isExample() ? exampleDocs() : importDocs().concat(hr.length ? [{id:"house", kind:"import", name:"House cost sheet", account:"House cost sheet", txns:hr}] : []);
@@ -743,6 +769,7 @@ function allTxns(){
     out.push({...t, acct: t.acct || doc.account || "Unnamed account", src: doc.name, imp: doc.id, cat, hint});
   }
   out.sort((a,b) => a.d < b.d ? 1 : a.d > b.d ? -1 : 0);
+  flagRepeats(out);
   return out;
 }
 
@@ -900,7 +927,7 @@ function renderMerchants(list){
 const drcr = a => a < 0 ? `<span class="drcr cr" title="Credit: money in">Cr</span>` : `<span class="drcr db" title="Debit: money out">Db</span>`;
 const catOptions = sel => CAT_NAMES.map(c => `<option ${c===sel?"selected":""}>${esc(c)}</option>`).join("");
 function renderRegister(list){
-  $("#catFilter").innerHTML = `<option value="">All categories</option><option value="__review">Not recognised (in Misc.)</option><option value="__househint">Possible house payments</option>` + CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
+  $("#catFilter").innerHTML = `<option value="">All categories</option><option value="__review">Not recognised (in Misc.)</option><option value="__househint">Possible house payments</option><option value="__repeat">Repeated within 3 days</option>` + CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
   $("#catFilter").value = S.catFilter;
   const racc = [...new Set(list.map(t=>t.acct))].sort();
   if(S.regAcct !== "all" && !racc.includes(S.regAcct)) S.regAcct = "all";
@@ -911,6 +938,7 @@ function renderRegister(list){
   const base = rows;
   if(S.catFilter === "__review") rows = rows.filter(isUnsorted);
   else if(S.catFilter === "__househint") rows = rows.filter(t=>t.hint);
+  else if(S.catFilter === "__repeat") rows = rows.filter(t=>t.rep);
   else if(S.catFilter) rows = rows.filter(t=>t.cat===S.catFilter);
   const q = S.search.trim().toLowerCase();
   if(q) rows = rows.filter(t => t.s.toLowerCase().includes(q) || t.acct.toLowerCase().includes(q) || String(t.a).includes(q) || t.cat.toLowerCase().includes(q));
@@ -919,14 +947,14 @@ function renderRegister(list){
   $("#regSort").value = S.regSort;
   const sum = rows.reduce((s,t)=>s+t.a,0);
   $("#regCount").textContent = `${rows.length} ${rows.length===1?"entry":"entries"} · net ${money(sum,true)}`;
-  $("#chips").innerHTML = (S.catFilter ? `<span class="chip">${esc(S.catFilter==="__review"?"Not recognised":S.catFilter==="__househint"?"Possible house payments":S.catFilter)}<button data-clear="cat" aria-label="Clear category filter">×</button></span>` : "")
+  $("#chips").innerHTML = (S.catFilter ? `<span class="chip">${esc(S.catFilter==="__review"?"Not recognised":S.catFilter==="__househint"?"Possible house payments":S.catFilter==="__repeat"?"Repeated within 3 days":S.catFilter)}<button data-clear="cat" aria-label="Clear category filter">×</button></span>` : "")
     + (S.regAcct!=="all" ? `<span class="chip">${esc(S.regAcct)}<button data-clear="acct" aria-label="Clear card filter">×</button></span>` : "");
   const shown = rows.slice(0, S.showN);
   const ex = isExample();
   const ro = t => ex || t.imp === "house";
   const arrow = k => sk === k ? (sd === "asc" ? "▲" : "▼") : "";
-  const nUnrec = base.filter(t => isUnsorted(t) && !ro(t)).length, nHint = base.filter(t=>t.hint).length, nIn = base.filter(t=>t.cat==="In house sheet").length;
-  $("#quick").innerHTML = (nUnrec ? `<button type="button" data-quick="__review" class="${S.catFilter==="__review"?"on":""}">Not recognised · ${nUnrec}</button>` : "")
+  const nUnrec = base.filter(t => isUnsorted(t) && !ro(t)).length, nHint = base.filter(t=>t.hint).length, nIn = base.filter(t=>t.cat==="In house sheet").length, nRep = base.filter(t=>t.rep).length;
+  $("#quick").innerHTML = (nRep ? `<button type="button" class="rep ${S.catFilter==="__repeat"?"on":""}" data-quick="__repeat">Repeated within 3 days · ${nRep}</button>` : "") + (nUnrec ? `<button type="button" data-quick="__review" class="${S.catFilter==="__review"?"on":""}">Not recognised · ${nUnrec}</button>` : "")
     + (nHint ? `<button type="button" class="house ${S.catFilter==="__househint"?"on":""}" data-quick="__househint">Possible house payments · ${nHint}</button>` : "")
     + (nIn ? `<button type="button" class="house ${S.catFilter==="In house sheet"?"on":""}" data-quick="In house sheet">Left out: already in house sheet · ${nIn}</button>` : "");
   const keyOf = t => t.imp + "|" + t.id;
@@ -939,7 +967,7 @@ function renderRegister(list){
     <div class="reg-row ${S.sel.has(keyOf(t))?"picked":""}" data-id="${esc(t.id)}" data-imp="${esc(t.imp)}">
       <span class="cb"><input type="checkbox" class="rsel" aria-label="Select" ${S.sel.has(keyOf(t))?"checked":""} ${ro(t)?"disabled":""}></span>
       <span class="d">${shortDate(t.d)}</span>
-      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.hint?` · <span style="color:var(--c-house)">looks like a house payment</span>`:""}</small></span>
+      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.hint?` · <span style="color:var(--c-house)">looks like a house payment</span>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote" title="${esc(r.other.s)}">same charge on ${shortDate(r.other.d)} (${esc(r.other.acct)})</span> <button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`).join(""):""}</small></span>
       <span class="catc"><select aria-label="Category" class="${isUnsorted(t)&&!ro(t)?"other":""}" ${isUnsorted(t)&&!ro(t)?'title="Not recognised: pick the right category"':""} ${ro(t)?"disabled title=\"Edit this in the Google Sheet\"":""}>${catOptions(t.cat)}</select></span>
       <span class="a ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)}${drcr(t.a)}</span>
       <button class="x" aria-label="Delete this transaction" ${ro(t)?"disabled":""}>×</button>
@@ -1065,6 +1093,10 @@ $("#bulkApply").onclick = () => {
   }, "Undo");
 };
 $("#regSort").onchange = e => { S.regSort = e.target.value; renderAll(); };
+$("#reg").addEventListener("click", e => {
+  const nd = e.target.closest("[data-notdup]");
+  if(nd){ const pk = nd.dataset.notdup; saveSettings({notDup:(settings().notDup||[]).concat(pk)}); toast("Marked as not a duplicate.", () => saveSettings({notDup:(settings().notDup||[]).filter(x=>x!==pk)}), "Undo"); }
+});
 $("#reg").addEventListener("click", e => {
   const b = e.target.closest("[data-sort]"); if(!b) return;
   const [k, d] = S.regSort.split("-"); S.regSort = b.dataset.sort === k ? `${k}-${d==="desc"?"asc":"desc"}` : `${b.dataset.sort}-desc`; renderAll();
@@ -1544,12 +1576,13 @@ function buildTable(st){
   finishStage(st);
 }
 function finishStage(st){
-  const existing = new Set(TX.filter(t=>t.imp!=="example").map(t => dupKey(t.d, t.a, t.s)));
-  st.dups = st.txns.filter(t => existing.has(dupKey(t.d,t.a,t.s))).length;
   if(!st.txns.length){ st.status = st.kind==="pdf" ? "Couldn’t find transactions in this PDF’s layout." + (S.sample?" Try having Claude read it.":"") : "No transactions found. Check the column choices below."; st.statusKind = "warn"; }
-  else { const ds = st.txns.map(t=>t.d).sort(); st.status = `Found ${st.txns.length} transactions, ${shortDate(ds[0])} – ${shortDate(ds[ds.length-1])}` + (st.dups?` · ${st.dups} already imported (will be skipped)`:""); st.statusKind = "ok"; }
+  else { const ds = st.txns.map(t=>t.d).sort(); st.status = `Found ${st.txns.length} transactions, ${shortDate(ds[0])} – ${shortDate(ds[ds.length-1])}`; st.statusKind = "ok"; }
 }
-const dupKey = (d,a,s) => `${d}|${Math.round(a*100)}|${String(s).toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,30)}`;
+/* already imported = same card, date, amount and description; the same charge on another card is kept */
+const dupKey = (d,a,s,acct) => `${String(acct).trim().toLowerCase()}|${d}|${Math.round(a*100)}|${String(s).toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,30)}`;
+const importedKeys = () => new Set(TX.filter(t=>t.imp!=="example").map(t => dupKey(t.d, t.a, t.s, t.acct)));
+function freshTxns(st){ const have = importedKeys(); return st.txns.filter(t => !have.has(dupKey(t.d, t.a, t.s, st.account))); }
 
 /* PDF */
 async function readPdf(st, password){
@@ -1671,6 +1704,7 @@ function renderStages(){
     const prev = st.txns.length ? `<div class="preview"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>
       ${st.txns.slice(0,8).map(t=>`<tr><td>${shortDate(t.d)}</td><td>${esc(t.s.slice(0,60))}</td><td>${esc(effCat(t))}</td><td class="n ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)} ${drcr(t.a)}</td></tr>`).join("")}
       </tbody></table></div>${st.txns.length>8?`<span class="muted" style="font-size:.82rem">…and ${st.txns.length-8} more</span>`:""}` : "";
+    const dups = st.txns.length && st.account.trim() && !st.imported ? st.txns.length - freshTxns(st).length : 0;
     const canClaude = S.sample && !st.busy && ((st.kind==="pdf" && st.text) || (st.kind==="image" && S.imgLimits));
     return `<div class="stage" data-st="${st.id}">
       <div class="stage-head"><span class="fn">${esc(st.name)}</span>${st.imported?`<span class="status ok">Imported ✓</span>`:`<button class="btn small ghost" data-rm>Remove</button>`}</div>
@@ -1681,11 +1715,11 @@ function renderStages(){
         ${st.account.trim()?"":`<span class="need">Pick the card before importing.</span>`}
       </div>
       ${st.needsPassword ? `<form class="row" data-pw><input type="password" placeholder="PDF password" aria-label="PDF password" autocomplete="off"><button class="btn small">Unlock</button></form>` : ""}
-      <div class="status ${st.statusKind}">${st.busy?'<span class="spin"></span> ':""}${esc(st.status)}</div>
+      <div class="status ${st.statusKind}">${st.busy?'<span class="spin"></span> ':""}${esc(st.status)}${dups?` · ${dups} already imported for this card (will be skipped)`:""}</div>
       ${mapUI}${prev}
       <div class="row">
         ${canClaude ? `<button class="btn small" data-claude>${st.kind==="image"?"Read with Claude":st.method==="claude"?"Read again with Claude":"Have Claude read it instead"}</button>` : ""}
-        ${st.txns.length ? `<button class="btn small primary" data-import ${st.account.trim()?"":"disabled"}>Import ${st.txns.length - (st.dups||0)} transactions</button>` : ""}
+        ${st.txns.length ? `<button class="btn small primary" data-import ${st.account.trim()?"":"disabled"}>Import ${st.txns.length - dups} transactions</button>` : ""}
       </div>`}
     </div>`;
   }).join("");
@@ -1694,6 +1728,7 @@ function stageOf(el){ const id = el.closest("[data-st]")?.dataset.st; return S.s
 $("#stages").addEventListener("change", e => {
   const st = stageOf(e.target); if(!st) return;
   if(e.target.dataset.map){ const k = e.target.dataset.map; if(e.target.value==="") delete st.map[k]; else st.map[k] = +e.target.value; buildTable(st); renderStages(); }
+  if(e.target.dataset.acct !== undefined) renderStages();
 });
 $("#stages").addEventListener("input", e => { const st = stageOf(e.target); if(st && e.target.dataset.acct!==undefined){ st.account = e.target.value; const b = e.target.closest(".stage").querySelector("[data-import]"); if(b) b.disabled = !st.account.trim(); const nd = e.target.closest(".field").querySelector(".need"); if(nd) nd.hidden = !!st.account.trim(); } });
 $("#stages").addEventListener("submit", e => { e.preventDefault(); const st = stageOf(e.target); const pw = e.target.querySelector("input").value; st.status = "Unlocking…"; renderStages(); readPdf(st, pw).catch(()=>{ st.status="Couldn’t open this PDF."; st.statusKind="err"; }).finally(renderStages); });
@@ -1713,10 +1748,9 @@ $("#importAll").onclick = () => {
   if(missing.length) toast(`Pick the card for ${missing.map(s=>s.name).join(", ")} to import ${missing.length>1?"them":"it"}.`);
 };
 function importStage(st){
-  const existing = new Set(TX.filter(t=>t.imp!=="example").map(t => dupKey(t.d, t.a, t.s)));
-  const fresh = st.txns.filter(t => !existing.has(dupKey(t.d,t.a,t.s)));
-  if(!fresh.length){ st.status = "Everything in this file is already imported."; st.statusKind="warn"; renderStages(); return; }
   const account = (st.account||"").trim(); if(!account){ toast("Pick which card this statement is from."); return; }
+  const fresh = freshTxns(st);
+  if(!fresh.length){ st.status = "Everything in this file is already imported for this card."; st.statusKind="warn"; renderStages(); return; }
   for(let i=0;i<fresh.length;i+=1200){
     const part = fresh.slice(i,i+1200);
     const id = "imp_" + Date.now().toString(36) + rid().slice(0,4);
