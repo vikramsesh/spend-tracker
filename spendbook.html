@@ -139,7 +139,9 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 .hist{display:flex;flex-direction:column;font-size:.85rem}
 .hist div{display:grid;grid-template-columns:minmax(0,1fr) auto auto 2rem;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}
 .inc-note{font-size:.8rem;color:var(--muted)}
-#undoBtn .undo-what{max-width:220px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:.82rem}
+.btn.undo{background:var(--danger);border-color:var(--danger);color:var(--surface)}
+.btn.undo:hover{filter:brightness(1.08);border-color:var(--danger)}
+#undoBtn .undo-what{max-width:220px;overflow:hidden;text-overflow:ellipsis;opacity:.85;font-size:.82rem}
 #undoBtn .undo-what:not(:empty)::before{content:"· "}
 @media (max-width:760px){#undoBtn .undo-what{display:none}}
 .hist-log{display:flex;flex-direction:column;font-size:.87rem}
@@ -281,8 +283,8 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <label class="sr" for="period" hidden>Period</label>
       <select id="period" aria-label="Period"></select>
       <select id="acctFilter" aria-label="Account"></select>
-      <button class="btn" id="undoBtn" type="button" hidden><span aria-hidden="true">↶</span> Undo<span class="undo-what" id="undoWhat"></span></button>
       <button class="btn primary" id="uploadBtn">Upload statements</button>
+      <button class="btn undo" id="undoBtn" type="button" hidden><span aria-hidden="true">↶</span> Undo<span class="undo-what" id="undoWhat"></span></button>
     </div>
   </header>
 
@@ -382,6 +384,15 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
           <select id="dateOrder"><option value="auto">Detect automatically</option><option value="dmy">Day first (31/01/2026)</option><option value="mdy">Month first (01/31/2026)</option></select></label>
       </div>
       <div class="field"><span>Your category rules</span><div class="rules" id="rules"></div></div>
+      <div class="field"><span>Your cards and accounts</span>
+        <div class="rules" id="cardsList"></div>
+        <form class="row" id="cardAdd"><input type="text" id="cardNew" placeholder="e.g. Rewards Visa" aria-label="New card or account name" style="flex:1 1 200px"><button class="btn small" type="submit">Add</button></form>
+        <small class="muted">Shown when you upload a statement. Removing one only takes it off that list; its transactions stay.</small>
+      </div>
+      <div class="field"><span>House cost sheet</span>
+        <form class="row" id="sheetForm"><input type="text" id="sheetUrl" placeholder="Google Sheet link or ID" aria-label="Google Sheet link or ID" style="flex:1 1 260px"><input type="text" id="sheetTab" placeholder="Tab name" aria-label="Tab name" style="flex:0 1 150px"><button class="btn small" type="submit">Save</button></form>
+        <small class="muted" id="sheetNote"></small>
+      </div>
       <details id="howSort"><summary>How sorting works</summary><div id="howSortBody" class="inc-note" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:.84rem"></div></details>
       <div class="row">
         <button class="btn small" id="claudeCatBtn" hidden>Ask Claude to sort unrecognised</button>
@@ -450,6 +461,13 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
 </div>
 
 <datalist id="acctList"></datalist>
+<div class="overlay" id="undoAsk" hidden>
+  <div class="sheet narrow" role="alertdialog" aria-modal="true" aria-labelledby="undoAskTitle" aria-describedby="undoAskText">
+    <div class="sheet-head"><h2 id="undoAskTitle">Undo this change?</h2></div>
+    <p id="undoAskText" style="margin:0"></p>
+    <div class="row" style="justify-content:flex-end"><button class="btn" type="button" data-close="undoAsk">Cancel</button><button class="btn undo" type="button" id="undoYes">Undo</button></div>
+  </div>
+</div>
 
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
@@ -487,18 +505,26 @@ const KW = {
 const REFUND_WORDS = ["refund","reversal","reversed","cashback","cash back","rfnd","chargeback"];
 
 /* ---------- state ---------- */
-const CARDS = ["Amex Gold Delta","Chase Sapphire","Chase Freedom Unlimited","Chase checking","Amex Blue Cash","Costco Citi Advantage"];
+/* your cards and accounts are set in Settings; until then, the accounts on your imported statements */
+function derivedCards(){ return [...new Set(importDocs().filter(d => d.id !== "manual").map(d => (d.account||"").trim()).filter(Boolean))].sort(); }
+function cardList(){ const c = S.docs.settings && S.docs.settings.cards; return Array.isArray(c) ? c : derivedCards(); }
+/* pre-select the card whose name shares the most words with the file name */
 function guessCard(name){
-  const n = name.toLowerCase();
-  if(/gold|delta/.test(n)) return "Amex Gold Delta";
-  if(/sapphire|csp/.test(n)) return "Chase Sapphire";
-  if(/freedom|cfu/.test(n)) return "Chase Freedom Unlimited";
-  if(/checking|chk/.test(n)) return "Chase checking";
-  if(/blue.?cash|bcp/.test(n)) return "Amex Blue Cash";
-  if(/costco|citi/.test(n)) return "Costco Citi Advantage";
-  return "";
+  const n = name.toLowerCase(); let best = "", score = 0;
+  for(const c of cardList()){
+    const sc = c.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3 && n.includes(w)).length;
+    if(sc > score){ score = sc; best = c; }
+  }
+  return best;
 }
-const HOUSE_SHEET = {id:"1Abdhjuq31tjEQ7wD2eDok9xnz2r36v9PRuwhHbA5VLk", tab:"House cost"};
+/* the house cost sheet is set in Settings; until then, the sheet last read into the book */
+function houseSheet(){
+  const st = S.docs.settings && S.docs.settings.houseSheet;
+  if(st && st.id) return {id: st.id, tab: st.tab || "House cost"};
+  if(S.house && S.house.sheetId) return {id: S.house.sheetId, tab: S.house.tab || "House cost"};
+  return null;
+}
+const sheetIdFrom = v => { v = String(v||"").trim(); const m = v.match(/\/d\/([A-Za-z0-9_-]+)/); const id = m ? m[1] : v; return /^[A-Za-z0-9_-]{20,}$/.test(id) ? id : null; };
 function loadHidden(){ try{ return new Set(JSON.parse(localStorage.getItem("spendbook-hidden")||"[]")); }catch(e){ return new Set(); } }
 function saveHidden(){ try{ localStorage.setItem("spendbook-hidden", JSON.stringify([...S.hiddenCats])); }catch(e){} }
 const S = {
@@ -695,6 +721,12 @@ function describeChanges(changes){
       if(nd > 0) parts.push("Marked a repeated charge as not a duplicate"); else if(nd < 0) parts.push("Unmarked a not-a-duplicate charge");
       if(b.currency !== undefined && a.currency !== b.currency) parts.push(`Changed currency to ${a.currency}`);
       if(b.dateOrder !== undefined && a.dateOrder !== b.dateOrder) parts.push("Changed how statement dates are read");
+      if(stableStr(a.cards) !== stableStr(b.cards) && Array.isArray(a.cards)){
+        const was = Array.isArray(b.cards) ? b.cards : derivedCards();
+        for(const c of a.cards) if(!was.includes(c)) parts.push(`Added card ${c}`);
+        for(const c of was) if(!a.cards.includes(c)) parts.push(`Removed card ${c}`);
+      }
+      if(stableStr(a.houseSheet) !== stableStr(b.houseSheet)) parts.push(a.houseSheet ? "Changed the house cost sheet" : "Removed the house cost sheet");
       if(parts.length === n0) parts.push("Changed settings");
       continue;
     }
@@ -964,7 +996,7 @@ function renderAll(){
   if(S.account !== "all" && !accts.includes(S.account)) S.account = "all";
   $("#acctFilter").innerHTML = `<option value="all">All accounts</option>` + accts.map(a=>`<option>${esc(a)}</option>`).join("");
   $("#acctFilter").value = S.account;
-  $("#acctList").innerHTML = [...new Set(["Cash",...CARDS,...accts])].map(a=>`<option value="${esc(a)}">`).join("");
+  $("#acctList").innerHTML = [...new Set(["Cash",...cardList(),...accts])].map(a=>`<option value="${esc(a)}">`).join("");
 
   const acctTx = TX.filter(t => S.account==="all" || t.acct===S.account);
   const periodTx = acctTx.filter(t => inPeriod(t, S.period, latest));
@@ -1146,12 +1178,14 @@ function houseBlock(){
   const hr = houseRows(), h = S.house;
   const canRead = (S.mcp || S.fbUser) && S.houseDb;
   const btn = canRead ? `<button class="btn small" id="houseRefresh" ${S.houseBusy?"disabled":""}>${S.houseBusy?'<span class="spin"></span> Reading…':(hr.length?"Refresh from sheet":"Read the sheet")}</button>` : "";
-  if(!hr.length) return canRead ? `<div class="imp"><div style="min-width:0"><div class="t">House cost sheet</div><small>Not read yet. Pulls paid, dated rows from the “House cost” tab.</small></div>${btn}</div>` : "";
+  const hs = houseSheet();
+  if(!hr.length) return !canRead ? "" : !hs ? `<div class="imp"><div style="min-width:0"><div class="t">House cost sheet</div><small>Add your house cost sheet under Settings to read it.</small></div></div>`
+    : `<div class="imp"><div style="min-width:0"><div class="t">House cost sheet</div><small>Not read yet. Pulls paid, dated rows from the “${esc(hs.tab)}” tab.</small></div>${btn}</div>`;
   const ds = hr.map(t=>t.d).sort(), tot = hr.reduce((s,t)=>s+t.a,0);
   const skipped = [];
   if(h.pending?.length) skipped.push(`${h.pending.length} pending (${h.pending.map(x=>esc(x)).join(", ")})`);
   if(h.undated?.length) skipped.push(`${h.undated.length} paid but undated (${h.undated.map(x=>esc(x)).join(", ")})`);
-  return `<div class="imp"><div style="min-width:0"><div class="t"><a href="https://docs.google.com/spreadsheets/d/${HOUSE_SHEET.id}/edit" target="_blank" rel="noopener" style="color:inherit">House cost sheet</a></div>
+  return `<div class="imp"><div style="min-width:0"><div class="t">${hs ? `<a href="https://docs.google.com/spreadsheets/d/${esc(hs.id)}/edit" target="_blank" rel="noopener" style="color:inherit">House cost sheet</a>` : "House cost sheet"}</div>
     <small>${hr.length} entries · ${money(tot)} · ${shortDate(ds[0])} – ${shortDate(ds[ds.length-1])}${h.readAt?` · read ${new Date(h.readAt).toLocaleDateString()}`:""}</small>
     ${skipped.length?`<small style="display:block">Left out: ${skipped.join("; ")}.</small>`:""}
     ${(() => { const inn = TX.filter(t=>t.cat==="In house sheet"), hint = TX.filter(t=>t.hint);
@@ -1194,6 +1228,12 @@ function renderSettings(){
   $("#dateOrder").value = st.dateOrder;
   $("#rules").innerHTML = st.rules.length ? st.rules.map((r,i)=>`<span class="rule">“${esc(r.m)}” → ${esc(r.c)}<button data-rule="${i}" aria-label="Remove rule">×</button></span>`).join("")
     : `<span class="muted" style="font-size:.85rem">None yet. Change a transaction’s category and you’ll be offered a rule for that merchant.</span>`;
+  const cards = cardList();
+  $("#cardsList").innerHTML = cards.length ? cards.map((c,i)=>`<span class="rule">${esc(c)}<button type="button" data-card-rm="${i}" aria-label="Remove ${esc(c)}">×</button></span>`).join("")
+    : `<span class="muted" style="font-size:.85rem">None yet. Add the cards and accounts your statements come from.</span>`;
+  const hs = houseSheet();
+  if(!$("#sheetForm").contains(document.activeElement)){ $("#sheetUrl").value = hs ? hs.id : ""; $("#sheetTab").value = hs ? hs.tab : "House cost"; }
+  $("#sheetNote").textContent = hs ? "Share the sheet with everyone who will refresh it." : "Paste the link from your browser’s address bar while the sheet is open.";
 }
 async function saveSettings(patch){ await putDoc("settings", Object.assign({}, settings(), patch)); }
 
@@ -1304,6 +1344,23 @@ $("#imports").addEventListener("click", e => {
 });
 $("#rules").addEventListener("click", e => { const i = e.target.dataset.rule; if(i===undefined) return; const rules = settings().rules.slice(); rules.splice(+i,1); saveSettings({rules}); });
 $("#currency").onchange = e => saveSettings({currency:e.target.value});
+$("#cardAdd").onsubmit = e => {
+  e.preventDefault(); const name = $("#cardNew").value.trim(); if(!name) return;
+  const cards = cardList();
+  if(cards.some(c => c.toLowerCase() === name.toLowerCase())){ toast(`${name} is already in your list.`); return; }
+  saveSettings({cards: cards.concat(name)}); $("#cardNew").value = "";
+};
+$("#cardsList").addEventListener("click", e => {
+  const i = e.target.dataset.cardRm; if(i === undefined) return;
+  const cards = cardList().slice(); cards.splice(+i, 1); saveSettings({cards});
+});
+$("#sheetForm").onsubmit = e => {
+  e.preventDefault();
+  const raw = $("#sheetUrl").value.trim(), tab = $("#sheetTab").value.trim() || "House cost";
+  if(!raw){ saveSettings({houseSheet: null}); toast("House cost sheet removed."); return; }
+  const id = sheetIdFrom(raw); if(!id){ toast("That doesn’t look like a Google Sheet link or ID."); return; }
+  saveSettings({houseSheet: {id, tab}}); document.activeElement.blur(); toast("House cost sheet saved. Use Refresh from sheet to read it.");
+};
 $("#dateOrder").onchange = e => saveSettings({dateOrder:e.target.value});
 
 /* ---------- recurring charges ---------- */
@@ -1523,9 +1580,9 @@ $("#invFile").onchange = async e => {
 };
 
 /* ---------- House cost sheet ---------- */
-function parseHouseSheet(text){
-  const start = text.indexOf("### Sheet Name: " + HOUSE_SHEET.tab);
-  if(start < 0) throw new Error(`Couldn’t find a tab named “${HOUSE_SHEET.tab}” in the sheet.`);
+function parseHouseSheet(text, tab){
+  const start = text.indexOf("### Sheet Name: " + tab);
+  if(start < 0) throw new Error(`Couldn’t find a tab named “${tab}” in the sheet.`);
   const sect = text.slice(start + 5).split("\n### Sheet Name: ")[0];
   const lines = sect.split("\n").map(l=>l.trim()).filter(l => l.startsWith("|"));
   return parseHouseCells(lines.map(l => l.replace(/^\|/,"").replace(/\|$/,"").split(/(?<!\\)\|/).map(c => c.trim().replace(/\\(.)/g,"$1"))));
@@ -1552,7 +1609,7 @@ function parseHouseCells(cells){
 }
 /* hosted version: read the tab with the signed-in Google account (needs the Google Sheets API turned on) */
 let sheetsToken = null;
-async function readHouseWithSheetsApi(){
+async function readHouseWithSheetsApi(hs){
   if(!sheetsToken || Date.now() > sheetsToken.exp){
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.addScope("https://www.googleapis.com/auth/spreadsheets.readonly");
@@ -1560,30 +1617,31 @@ async function readHouseWithSheetsApi(){
     const res = await firebase.auth().currentUser.reauthenticateWithPopup(provider);
     sheetsToken = {value: res.credential.accessToken, exp: Date.now() + 50*60*1000};
   }
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${HOUSE_SHEET.id}/values/${encodeURIComponent("'" + HOUSE_SHEET.tab + "'")}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${hs.id}/values/${encodeURIComponent("'" + hs.tab + "'")}`;
   const r = await fetch(url, {headers:{Authorization: "Bearer " + sheetsToken.value}});
   if(!r.ok){
     if(r.status === 401) sheetsToken = null;
     const msg = ((await r.json().catch(() => null)) || {}).error?.message || "";
     throw new Error(r.status === 403 && /has not been used|is disabled/i.test(msg) ? "Turn on the Google Sheets API for this Firebase project, then try again."
       : r.status === 403 || r.status === 404 ? `${S.fbUser.email} can’t open the house cost sheet. Share the sheet with this account, then try again.`
-      : r.status === 400 ? `Couldn’t find a tab named “${HOUSE_SHEET.tab}” in the sheet.`
+      : r.status === 400 ? `Couldn’t find a tab named “${hs.tab}” in the sheet.`
       : "Couldn’t read the sheet. Try again in a moment.");
   }
   return parseHouseCells((await r.json()).values || []);
 }
-async function readHouseWithMcp(){
-  const r = await S.mcp.callTool("Google Drive", "read_file_content", {fileId: HOUSE_SHEET.id}, {cache:false});
+async function readHouseWithMcp(hs){
+  const r = await S.mcp.callTool("Google Drive", "read_file_content", {fileId: hs.id}, {cache:false});
   const p = r.payload;
   const text = (p && typeof p === "object" && p.fileContent) || (typeof p === "string" ? p : (r.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n"));
-  return parseHouseSheet(String(text||""));
+  return parseHouseSheet(String(text||""), hs.tab);
 }
 async function refreshHouse(){
   if(!(S.mcp || S.fbUser) || !S.houseDb || S.houseBusy) return;
+  const hs = houseSheet(); if(!hs){ toast("Add your house cost sheet in Settings first."); return; }
   S.houseBusy = true; renderImports();
   try{
-    const parsed = S.fbUser ? await readHouseWithSheetsApi() : await readHouseWithMcp();
-    await S.houseDb.set({sheetId:HOUSE_SHEET.id, tab:HOUSE_SHEET.tab, readAt:new Date().toISOString(), ...parsed});
+    const parsed = S.fbUser ? await readHouseWithSheetsApi(hs) : await readHouseWithMcp(hs);
+    await S.houseDb.set({sheetId:hs.id, tab:hs.tab, readAt:new Date().toISOString(), ...parsed});
     logChange(`Read ${parsed.rows.length} house costs from the house sheet`);
     toast(`Read ${parsed.rows.length} house costs from the sheet.`);
   }catch(e){
@@ -1645,8 +1703,8 @@ $("#claudeCatBtn").onclick = async () => {
 
 /* ---------- overlays ---------- */
 document.addEventListener("click", e => { const c = e.target.closest("[data-close]"); if(c) $("#"+c.dataset.close).hidden = true; });
-document.addEventListener("keydown", e => { if(e.key==="Escape"){ $("#importer").hidden = true; } });
-[$("#importer")].forEach(o => o.addEventListener("mousedown", e => { if(e.target===o) o.hidden = true; }));
+document.addEventListener("keydown", e => { if(e.key==="Escape"){ $("#importer").hidden = true; $("#undoAsk").hidden = true; } });
+[$("#importer"), $("#undoAsk")].forEach(o => o.addEventListener("mousedown", e => { if(e.target===o) o.hidden = true; }));
 $("#uploadBtn").onclick = $("#bannerUpload").onclick = () => { $("#importer").hidden = false; };
 
 /* ---------- import: files ---------- */
@@ -1935,7 +1993,7 @@ function renderStages(){
       <div class="stage-head"><span class="fn">${esc(st.name)}</span>${st.imported?`<span class="status ok">Imported ✓</span>`:`<button class="btn small ghost" data-rm>Remove</button>`}</div>
       ${st.imported ? "" : `
       <div class="field"><span>Which card is this?</span>
-        <div class="cardpick" role="group" aria-label="Which card is this?">${CARDS.map(c=>`<button type="button" data-card="${esc(c)}" class="${!st.other&&st.account===c?"on":""}">${esc(c)}</button>`).join("")}<button type="button" data-card="__other" class="${st.other?"on":""}">Other…</button></div>
+        <div class="cardpick" role="group" aria-label="Which card is this?">${cardList().map(c=>`<button type="button" data-card="${esc(c)}" class="${!st.other&&st.account===c?"on":""}">${esc(c)}</button>`).join("")}<button type="button" data-card="__other" class="${st.other?"on":""}">Other…</button></div>
         ${st.other?`<input type="text" data-acct value="${esc(st.account)}" list="acctList" placeholder="Account name" aria-label="Account name">`:""}
         ${st.account.trim()?"":`<span class="need">Pick the card before importing.</span>`}
       </div>
@@ -1960,7 +2018,7 @@ $("#stages").addEventListener("submit", e => { e.preventDefault(); const st = st
 $("#stages").addEventListener("click", e => {
   const st = stageOf(e.target); if(!st) return;
   const cb = e.target.closest("[data-card]");
-  if(cb){ if(cb.dataset.card==="__other"){ st.other = true; if(CARDS.includes(st.account)) st.account = ""; } else { st.other = false; st.account = cb.dataset.card; } renderStages(); if(st.other) document.querySelector(`[data-st="${st.id}"] [data-acct]`)?.focus(); return; }
+  if(cb){ if(cb.dataset.card==="__other"){ st.other = true; if(cardList().includes(st.account)) st.account = ""; } else { st.other = false; st.account = cb.dataset.card; } renderStages(); if(st.other) document.querySelector(`[data-st="${st.id}"] [data-acct]`)?.focus(); return; }
   if(e.target.closest("[data-rm]")){ S.stages = S.stages.filter(s=>s!==st); renderStages(); }
   const sb = e.target.closest("[data-sign] button"); if(sb){ st.signMode = sb.dataset.v; if(st.method==="pdf") parsePdfText(st); else buildTable(st); renderStages(); }
   if(e.target.closest("[data-claude]")) claudeRead(st);
@@ -1985,15 +2043,24 @@ function importStage(st){
     const id = "imp_" + Date.now().toString(36) + rid().slice(0,4);
     putDoc(id, {kind:"import", name: st.name + (fresh.length>1200?` (part ${i/1200+1})`:""), account, createdAt:new Date().toISOString(), txns: part.map(({id,d,s,a})=>({id,d,s,a}))});
   }
+  const saved = S.docs.settings && S.docs.settings.cards;
+  if(Array.isArray(saved) && !saved.includes(account)) saveSettings({cards: saved.concat(account)});
   st.imported = true; renderStages();
   S.period = null; S.catFilter = "";
   toast(`Imported ${fresh.length} transactions from ${st.name}.`);
   if(S.stages.every(s=>s.imported || !s.txns.length)) setTimeout(()=>{ if(S.stages.every(s=>s.imported)){ $("#importer").hidden = true; S.stages = []; renderStages(); } }, 900);
 }
 
-$("#undoBtn").onclick = undoLast;
+/* undo asks first: shows what will be reversed */
+function askUndo(){
+  const last = UNDO[UNDO.length-1]; if(!last) return;
+  $("#undoAskText").textContent = last.text;
+  $("#undoAsk").hidden = false; $("#undoYes").focus();
+}
+$("#undoBtn").onclick = askUndo;
+$("#undoYes").onclick = () => { $("#undoAsk").hidden = true; undoLast(); };
 document.addEventListener("keydown", e => {
-  if((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !e.target.closest("input, textarea, select, [contenteditable]")){ e.preventDefault(); undoLast(); }
+  if((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !e.target.closest("input, textarea, select, [contenteditable]")){ e.preventDefault(); askUndo(); }
 });
 $("#histWho").onchange = e => { S.histWho = e.target.value; S.histN = 100; renderHistory(); };
 $("#histLog").addEventListener("click", e => { if(e.target.id === "histMore"){ S.histN += 100; renderHistory(); } });
