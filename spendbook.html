@@ -139,6 +139,21 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 .hist{display:flex;flex-direction:column;font-size:.85rem}
 .hist div{display:grid;grid-template-columns:minmax(0,1fr) auto auto 2rem;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}
 .inc-note{font-size:.8rem;color:var(--muted)}
+#undoBtn .undo-what{max-width:220px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:.82rem}
+#undoBtn .undo-what:not(:empty)::before{content:"· "}
+@media (max-width:760px){#undoBtn .undo-what{display:none}}
+.hist-log{display:flex;flex-direction:column;font-size:.87rem}
+.hist-log .h-row{display:grid;grid-template-columns:150px 160px 1fr;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);align-items:baseline}
+.hist-log .h-when{color:var(--muted);font-size:.8rem;font-variant-numeric:tabular-nums}
+.hist-log .h-who{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:640px){.hist-log .h-row{grid-template-columns:1fr;gap:2px}}
+.inv-need{border:1px solid var(--c-inv);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:.86rem}
+.inv-need h3{margin:0;font-size:.92rem}
+.inv-need .need-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.inv-need .need-row .what{flex:1 1 220px;min-width:0}
+.inv-need .need-row small{display:block;color:var(--muted)}
+.inv-need .need-row .amt{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.inv-need input[type=text]{width:170px}
 .reg-row input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}
 .reg-row.picked{background:var(--accent-soft)}
 .bulkbar{position:sticky;bottom:calc(10px + env(safe-area-inset-bottom,0px));z-index:5;display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--fg);color:var(--bg);border-radius:10px;padding:10px 14px;box-shadow:0 6px 24px rgb(0 0 0 / .2)}
@@ -179,6 +194,13 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 .filters input[type=search]{flex:1 1 200px}
 .filters .range{display:inline-flex;align-items:center;gap:6px;font-size:.85rem;color:var(--muted)}
 .filters .range input[type=number]{width:90px}
+.cat-guide{display:flex;flex-direction:column;gap:8px;margin-top:10px;font-size:.86rem}
+.cat-guide h3{margin:6px 0 0;font-size:.95rem}
+.cat-guide p{margin:0}
+.cat-guide dl{margin:0;display:grid;grid-template-columns:minmax(150px,max-content) 1fr;gap:6px 16px}
+.cat-guide dt{font-weight:600;display:flex;align-items:baseline;gap:6px}
+.cat-guide dd{margin:0}
+@media (max-width:560px){.cat-guide dl{grid-template-columns:1fr}.cat-guide dd{margin-bottom:6px}}
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:2px 4px 2px 10px;font-size:.82rem}
 .chip button{border:0;background:transparent;color:inherit;padding:0 6px;font-size:1rem;line-height:1}
 .reg{display:flex;flex-direction:column}
@@ -259,6 +281,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <label class="sr" for="period" hidden>Period</label>
       <select id="period" aria-label="Period"></select>
       <select id="acctFilter" aria-label="Account"></select>
+      <button class="btn" id="undoBtn" type="button" hidden><span aria-hidden="true">↶</span> Undo<span class="undo-what" id="undoWhat"></span></button>
       <button class="btn primary" id="uploadBtn">Upload statements</button>
     </div>
   </header>
@@ -307,10 +330,11 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
   <section class="panel" id="invPanel">
     <div class="panel-head"><h2>Investments</h2><span class="muted" style="font-size:.85rem">Robinhood, Schwab, Fidelity and others</span></div>
     <div class="inv-strip" id="invSum"></div>
+    <div class="inv-need" id="invNeed" hidden></div>
     <div class="inv-table" id="invTable"></div>
     <form class="inv-form" id="invForm">
       <label class="field"><span>Account</span><select id="invAcct"></select></label>
-      <label class="field" id="invOtherWrap" hidden><span>Account name</span><input type="text" id="invOther" placeholder="Vanguard 401(k)"></label>
+      <label class="field" id="invOtherWrap" hidden><span>New account name</span><input type="text" id="invOther" placeholder="Fidelity 401(k)"></label>
       <label class="field"><span>Value on</span><input type="date" id="invDate" required></label>
       <label class="field"><span>Account value</span><input type="number" id="invVal" step="0.01" min="0" required placeholder="25000"></label>
       <button class="btn primary" type="submit">Save value</button>
@@ -364,8 +388,49 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
         <button class="btn small" id="exportBtn">Export CSV</button>
       </div>
       <p class="muted" style="font-size:.82rem;margin:0">Card bill payments and transfers between your own accounts go under “Transfers” and are left out of spend, so a card payment from your bank account isn’t counted twice.</p>
+      <details id="catGuide"><summary>What each category means</summary>
+        <div class="cat-guide">
+          <h3>Spending</h3>
+          <p class="muted">Added up in <b>Spent</b> and shown in the category chart, the monthly trend and Top categories. A refund lands in the same category as a negative amount, so it lowers that category’s total.</p>
+          <dl>
+            <dt><i class="sw" style="background:var(--c-house)"></i>House</dt>
+            <dd>Mortgage, rent, HOA dues, property tax, escrow and home improvement stores (Home Depot, Lowe’s). Every row read from the house cost sheet is House. Card charges that look like a sheet payment are flagged <b>Check against house sheet</b> so you can confirm they aren’t counted twice.</dd>
+            <dt><i class="sw" style="background:var(--c-car)"></i>Car</dt>
+            <dd>Car loan and lease payments, auto insurance (GEICO), DMV and registration, oil changes, repairs, tyres, parts and car washes. Fuel is not here; it goes to Gas + Costco.</dd>
+            <dt><i class="sw" style="background:var(--c-gas)"></i>Gas + Costco</dt>
+            <dd>Fuel stations (Shell, Chevron, Arco…) and Costco or Sam’s Club, including Costco gas.</dd>
+            <dt><i class="sw" style="background:var(--c-groc)"></i>Groceries</dt>
+            <dd>Supermarkets and grocery delivery: Trader Joe’s, Safeway, Whole Foods, QFC, Indian grocers, Instacart and similar.</dd>
+            <dt><i class="sw" style="background:var(--c-dine)"></i>Dining Out + Entertainment</dt>
+            <dd>Restaurants, coffee, bars, food delivery (DoorDash, Uber Eats), movies, and streaming and subscriptions (Netflix, Spotify, Hulu).</dd>
+            <dt><i class="sw" style="background:var(--c-travel)"></i>Travel</dt>
+            <dd>Airlines, hotels, Airbnb, rental cars, Uber and Lyft rides, parking and tolls.</dd>
+            <dt><i class="sw" style="background:var(--c-util)"></i>Utilities</dt>
+            <dd>Electricity, natural gas, water, sewer, garbage, internet and phone bills.</dd>
+            <dt><i class="sw" style="background:var(--c-misc)"></i>Misc.</dt>
+            <dd>Shopping (Amazon, Target, Walmart), general insurance, pharmacy, doctors, gym, salon and bank fees. Anything the app doesn’t recognise also lands here and is flagged <b>Not recognised</b> for you to sort.</dd>
+          </dl>
+          <h3>Not spending</h3>
+          <p class="muted">Kept out of Spent, so they don’t inflate your spending.</p>
+          <dl>
+            <dt><i class="sw" style="background:var(--c-income)"></i>Income</dt>
+            <dd>Money coming in: pay, interest, dividends and tax refunds. Any other credit that isn’t a refund or transfer is treated as income too. Added up in <b>Money in</b>.</dd>
+            <dt><i class="sw" style="background:var(--c-inv)"></i>Investments</dt>
+            <dd>Money moved into brokerage or retirement accounts (Vanguard, Fidelity, Schwab, Robinhood…). Added up in <b>Invested</b>, not Spent.</dd>
+            <dt><i class="sw" style="background:var(--muted)"></i>Transfers</dt>
+            <dd>Money moving between your own accounts, and card bill payments as they appear on the card. Left out of every total, so paying a card bill doesn’t count the same purchases twice. A card payment leaving your checking account isn’t recognised automatically; set it to Transfers.</dd>
+            <dt><i class="sw" style="background:var(--muted)"></i>In house sheet</dt>
+            <dd>Card or bank charges you’ve confirmed are already in the house cost sheet (via <b>Same payment: leave out</b>). Left out of every total; the sheet’s copy is what counts as House.</dd>
+          </dl>
+          <p class="muted"><b>Left over</b> = Money in − Spent − Invested. To change a transaction’s category, use its dropdown in the transaction list; choose <b>Always for…</b> to make a rule, and your rules always win over the built-in keywords. The full keyword lists are under <b>How sorting works</b>.</p>
+        </div>
+      </details>
     </section>
   </div>
+  <section class="panel" id="historyPanel" hidden>
+    <div class="panel-head"><h2>Change history</h2><select id="histWho" aria-label="Show changes made by"></select></div>
+    <div class="hist-log" id="histLog"></div>
+  </section>
 </div>
 
 <div class="overlay" id="importer" hidden>
@@ -438,7 +503,7 @@ function loadHidden(){ try{ return new Set(JSON.parse(localStorage.getItem("spen
 function saveHidden(){ try{ localStorage.setItem("spendbook-hidden", JSON.stringify([...S.hiddenCats])); }catch(e){} }
 const S = {
   house:null, houseDb:null, mcp:null, houseBusy:false,
-  docs:{}, loaded:false, mode:"memory", fbUser:null, localCopy:null,
+  docs:{}, loaded:false, mode:"memory", fbUser:null, localCopy:null, logCol:null, log:[], histWho:"all", histN:100,
   period:null, account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), catFilter:"", search:"", dateFrom:"", dateTo:"", amtMin:null, amtMax:null, showN:150,
   stages:[], sample:null, downloads:null, imgLimits:null,
 };
@@ -559,6 +624,7 @@ function persistLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S.docs
 function localDocs(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||"{}") || {}; }catch(e){ return {}; } }
 async function putDoc(id, data){
   if(S.mode === "signin"){ toast("Sign in to save to the shared book."); return; }
+  track(id, S.docs[id], data);
   S.docs[id] = data; renderAll();
   if(S.mode === "cloud"){
     const prev = writeChains[id] || Promise.resolve();
@@ -570,12 +636,110 @@ async function putDoc(id, data){
 }
 async function delDoc(id){
   if(S.mode === "signin"){ toast("Sign in to change the shared book."); return; }
+  track(id, S.docs[id], undefined);
   delete S.docs[id]; renderAll();
   if(S.mode === "cloud"){
     const prev = writeChains[id] || Promise.resolve();
     writeChains[id] = prev.then(() => col.doc(id).delete()).catch(() => toast("Couldn’t delete that. Try again."));
     return writeChains[id];
   } else if(S.mode === "local") persistLocal();
+}
+/* ---------- undo + change history ----------
+   Every putDoc/delDoc from one click is grouped into a single step: described in words,
+   written to the shared history, and undoable (only if nobody has changed those docs since). */
+const UNDO = []; let batch = null;
+const sortKeys = v => Array.isArray(v) ? v.map(sortKeys) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map(k => [k, sortKeys(v[k])])) : v;
+const stableStr = v => v === undefined ? "" : JSON.stringify(sortKeys(v));
+const copyOf = v => v === undefined ? undefined : structuredClone(v);
+function track(id, before, after){
+  if(!batch){ batch = {changes:[]}; setTimeout(flushBatch, 0); }
+  const ex = batch.changes.find(c => c.id === id);
+  if(ex) ex.after = copyOf(after);
+  else batch.changes.push({id, before: copyOf(before), after: copyOf(after)});
+}
+function flushBatch(){
+  const b = batch; batch = null; if(!b) return;
+  const changes = b.changes.filter(c => stableStr(c.before) !== stableStr(c.after));
+  if(!changes.length) return;
+  if(b.undoOf){ logChange("Undid: " + b.undoOf); return; }
+  const text = describeChanges(changes);
+  UNDO.push({text, changes}); if(UNDO.length > 50) UNDO.shift();
+  renderUndo(); logChange(text);
+}
+function undoLast(){
+  const step = UNDO.pop(); renderUndo(); if(!step) return;
+  if(step.changes.some(c => stableStr(S.docs[c.id]) !== stableStr(c.after))){
+    toast(`Can’t undo “${step.text}”: it has been changed again since, maybe by someone else.`); return;
+  }
+  batch = {changes:[], undoOf: step.text}; setTimeout(flushBatch, 0);
+  for(const c of step.changes) c.before === undefined ? delDoc(c.id) : putDoc(c.id, structuredClone(c.before));
+  toast(`Undone: ${step.text}`);
+}
+function renderUndo(){
+  const last = UNDO[UNDO.length-1];
+  $("#undoBtn").hidden = !last;
+  $("#undoWhat").textContent = last ? last.text : "";
+  $("#undoBtn").title = last ? `Undo: ${last.text} (Ctrl+Z)` : "";
+}
+const nTx = n => `${n} transaction${n===1?"":"s"}`;
+const tLabel = t => `${String(t.s).slice(0,40)} (${money(Math.abs(t.a),true)}, ${shortDate(t.d)})`;
+function describeChanges(changes){
+  const parts = [], moved = {}, accts = {}, deleted = [], restored = [];
+  for(const {id, before, after} of changes){
+    if(id === "settings"){
+      const b = before || {}, a = after || {}, n0 = parts.length;
+      const bR = new Map((b.rules||[]).map(r=>[r.m, r.c])), aR = new Map((a.rules||[]).map(r=>[r.m, r.c]));
+      for(const [m, c] of aR) if(bR.get(m) !== c) parts.push(`Added rule: “${m}” → ${c}`);
+      for(const [m] of bR) if(!aR.has(m)) parts.push(`Removed rule “${m}”`);
+      const nd = (a.notDup||[]).length - (b.notDup||[]).length;
+      if(nd > 0) parts.push("Marked a repeated charge as not a duplicate"); else if(nd < 0) parts.push("Unmarked a not-a-duplicate charge");
+      if(b.currency !== undefined && a.currency !== b.currency) parts.push(`Changed currency to ${a.currency}`);
+      if(b.dateOrder !== undefined && a.dateOrder !== b.dateOrder) parts.push("Changed how statement dates are read");
+      if(parts.length === n0) parts.push("Changed settings");
+      continue;
+    }
+    if(id === "investments"){
+      const bV = new Map(((before||{}).values||[]).map(v=>[v.id, v])), aV = new Map(((after||{}).values||[]).map(v=>[v.id, v]));
+      for(const [k, v] of aV) if(!bV.has(k)) parts.push(`Saved ${v.acct} value ${money(v.v,true)} on ${shortDate(v.d)}`);
+      for(const [k, v] of bV) if(!aV.has(k)) parts.push(`Deleted ${v.acct} value ${money(v.v,true)} from ${shortDate(v.d)}`);
+      continue;
+    }
+    if(!before && after){ parts.push(`Imported ${nTx((after.txns||[]).length)} from ${after.name || id}${after.account ? ` (${after.account})` : ""}`); continue; }
+    if(before && !after){ parts.push(`Removed statement ${before.name || id} (${nTx((before.txns||[]).length)})`); continue; }
+    const bT = new Map((before.txns||[]).map(t=>[t.id, t])), aT = new Map((after.txns||[]).map(t=>[t.id, t]));
+    for(const [k, t] of bT) if(!aT.has(k)) deleted.push(t);
+    for(const [k, t] of aT){
+      const o = bT.get(k); if(!o){ restored.push(t); continue; }
+      if(o.c !== t.c){ const to = effCat(t); (moved[to] = moved[to] || []).push({t, from: effCat(o)}); }
+      if(o.ia !== t.ia){ const to = t.ia || ""; (accts[to] = accts[to] || []).push(t); }
+    }
+  }
+  for(const [to, list] of Object.entries(moved))
+    parts.push(list.length > 1 ? `Moved ${list.length} transactions to ${to}` : list[0].from === to ? `Confirmed ${tLabel(list[0].t)} as ${to}` : `Changed ${tLabel(list[0].t)} from ${list[0].from} to ${to}`);
+  for(const [to, list] of Object.entries(accts))
+    parts.push(to ? (list.length === 1 ? `Set investment account of ${tLabel(list[0])} to ${to}` : `Assigned ${list.length} investments to ${to}`)
+                  : (list.length === 1 ? `Cleared investment account of ${tLabel(list[0])}` : `Cleared the investment account of ${list.length} transactions`));
+  if(deleted.length) parts.push(deleted.length === 1 ? `Deleted ${tLabel(deleted[0])}` : `Deleted ${deleted.length} transactions`);
+  if(restored.length) parts.push(restored.length === 1 ? `Added ${tLabel(restored[0])}` : `Added back ${restored.length} transactions`);
+  return parts.join("; ") || "Edited transactions";
+}
+function logChange(text){
+  if(!S.logCol || !S.fbUser) return;
+  S.logCol.add({at: new Date().toISOString(), email: S.fbUser.email, name: S.fbUser.displayName || "", text: String(text).slice(0, 1000)})
+    .catch(() => toast("Couldn’t record this change in the history."));
+}
+function renderHistory(){
+  const panel = $("#historyPanel"); panel.hidden = !S.logCol;
+  if(!S.logCol) return;
+  const who = [...new Set(S.log.map(e => e.email))].sort();
+  if(S.histWho !== "all" && !who.includes(S.histWho)) S.histWho = "all";
+  $("#histWho").innerHTML = `<option value="all">Everyone</option>` + who.map(w => `<option value="${esc(w)}">${esc(w)}</option>`).join("");
+  $("#histWho").value = S.histWho;
+  const list = S.log.filter(e => S.histWho === "all" || e.email === S.histWho);
+  $("#histLog").innerHTML = list.length
+    ? list.slice(0, S.histN).map(e => `<div class="h-row"><span class="h-when">${esc(new Date(e.at).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}))}</span><span class="h-who" title="${esc(e.email)}">${esc(e.name || e.email)}</span><span>${esc(e.text)}</span></div>`).join("")
+      + (list.length > S.histN ? `<button class="btn small" id="histMore" type="button" style="margin-top:8px;align-self:flex-start">Show more</button>` : "")
+    : `<p class="empty">No changes recorded yet.</p>`;
 }
 function setBadge(){
   const b = $("#storeBadge");
@@ -611,8 +775,10 @@ function initFirebase(){
   auth.onAuthStateChanged(u => {
     unsubs.forEach(f => f()); unsubs = [];
     S.fbUser = u; S.localCopy = null; S.house = null;
-    if(!u){ col = null; S.houseDb = null; S.docs = {}; S.mode = "signin"; S.loaded = true; setBadge(); renderAll(); return; }
+    if(!u){ S.logCol = null; S.log = []; renderHistory(); col = null; S.houseDb = null; S.docs = {}; S.mode = "signin"; S.loaded = true; setBadge(); renderAll(); return; }
     col = fs.collection(BOOK + "/docs");
+    S.logCol = fs.collection(BOOK + "/log");
+    unsubs.push(S.logCol.orderBy("at", "desc").limit(500).onSnapshot(snap => { S.log = snap.docs.map(d => d.data()); renderHistory(); }, () => {}));
     S.houseDb = fs.doc(BOOK + "/meta/house");
     S.mode = "cloud"; S.loaded = false; setBadge();
     const denied = err => toast(err && err.code === "permission-denied"
@@ -967,7 +1133,7 @@ function renderRegister(list){
     <div class="reg-row ${S.sel.has(keyOf(t))?"picked":""}" data-id="${esc(t.id)}" data-imp="${esc(t.imp)}">
       <span class="cb"><input type="checkbox" class="rsel" aria-label="Select" ${S.sel.has(keyOf(t))?"checked":""} ${ro(t)?"disabled":""}></span>
       <span class="d">${shortDate(t.d)}</span>
-      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote" title="${esc(r.other.s)}">same charge on ${shortDate(r.other.d)} (${esc(r.other.acct)})</span> <button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`).join(""):""}</small></span>
+      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.cat==="Investments" && !ro(t) ? ` · <span style="color:var(--c-inv)">${t.ia ? `Account: ${esc(t.ia)}` : "Account not set (see Investments)"}</span>${t.ia ? ` <button type="button" class="linkbtn" data-ia-clear>Change</button>` : ""}` : ""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote" title="${esc(r.other.s)}">same charge on ${shortDate(r.other.d)} (${esc(r.other.acct)})</span> <button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`).join(""):""}</small></span>
       <span class="catc"><select aria-label="Category" class="${isUnsorted(t)&&!ro(t)?"other":""}" ${isUnsorted(t)&&!ro(t)?'title="Not recognised: pick the right category"':""} ${ro(t)?"disabled title=\"Edit this in the Google Sheet\"":""}>${catOptions(t.cat)}</select></span>
       <span class="a ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)}${drcr(t.a)}</span>
       <button class="x" aria-label="Delete this transaction" ${ro(t)?"disabled":""}>×</button>
@@ -1097,6 +1263,13 @@ $("#bulkApply").onclick = () => {
 };
 $("#regSort").onchange = e => { S.regSort = e.target.value; renderAll(); };
 $("#reg").addEventListener("click", e => {
+  if(e.target.closest("[data-ia-clear]")){
+    const row = e.target.closest(".reg-row"), f = findTxn(row.dataset.imp, row.dataset.id); if(!f) return;
+    const doc = structuredClone(f.doc); delete doc.txns[f.i].ia; putDoc(row.dataset.imp, doc);
+    toast("Pick its new account under Investments.");
+    $("#invPanel").scrollIntoView({block:"start"});
+    return;
+  }
   const hb = e.target.closest("[data-hm]");
   if(hb){
     const row = hb.closest(".reg-row"), f = findTxn(row.dataset.imp, row.dataset.id); if(!f) return;
@@ -1212,7 +1385,13 @@ $("#recTable").addEventListener("click", e => {
 /* ---------- investments ---------- */
 const BROKERS = ["Robinhood","Schwab","Fidelity"];
 const BROKER_KW = {"Robinhood":["robinhood"],"Schwab":["schwab"],"Fidelity":["fidelity","fid bkg","fmr llc"],"Vanguard":["vanguard"],"E*Trade":["etrade","e*trade"],"Wealthfront":["wealthfront"],"Betterment":["betterment"],"Coinbase":["coinbase"],"Merrill":["merrill"]};
-function brokerOf(desc){ const s = String(desc).toLowerCase(); for(const [b,ks] of Object.entries(BROKER_KW)) if(ks.some(k=>s.includes(k))) return b; return "Other investments"; }
+/* a guess from the description, only used to pre-select the account you confirm */
+function brokerOf(desc){ const s = String(desc).toLowerCase(); for(const [b,ks] of Object.entries(BROKER_KW)) if(ks.some(k=>s.includes(k))) return b; return null; }
+function invAccounts(){
+  const vals = invDoc().values || [];
+  return [...new Set([...BROKERS, ...vals.map(v=>v.acct), ...TX.filter(t=>t.cat==="Investments" && t.ia).map(t=>t.ia)])];
+}
+const invKey = t => merchantKey(t.s).split(" ")[0];
 const invDoc = () => S.docs.investments || {kind:"invest", values:[]};
 function spark(vals){
   if(vals.length < 2) return "";
@@ -1224,15 +1403,16 @@ function renderInvest(periodTx){
   const allInv = TX.filter(t => t.cat==="Investments");
   const perInv = periodTx.filter(t => t.cat==="Investments");
   const vals = (invDoc().values||[]).slice().sort((a,b)=>a.d.localeCompare(b.d));
-  const accts = [...new Set([...BROKERS, ...vals.map(v=>v.acct), ...allInv.map(t=>brokerOf(t.s))])];
+  const accts = invAccounts();
   const rows = accts.map(a => {
     const hist = vals.filter(v=>v.acct===a), last = hist[hist.length-1];
-    const all = allInv.filter(t=>brokerOf(t.s)===a).reduce((s,t)=>s+t.a,0);
-    const per = perInv.filter(t=>brokerOf(t.s)===a).reduce((s,t)=>s+t.a,0);
+    const all = allInv.filter(t=>t.ia===a).reduce((s,t)=>s+t.a,0);
+    const per = perInv.filter(t=>t.ia===a).reduce((s,t)=>s+t.a,0);
     return {a, hist, last, all, per};
   }).filter(r => BROKERS.includes(r.a) || r.hist.length || Math.abs(r.all) > 0.005);
   const value = rows.reduce((s,r)=>s+(r.last?r.last.v:0),0);
-  const putAll = rows.reduce((s,r)=>s+r.all,0), putPer = rows.reduce((s,r)=>s+r.per,0);
+  const putAll = allInv.reduce((s,t)=>s+t.a,0), putPer = perInv.reduce((s,t)=>s+t.a,0);
+  renderInvNeed(allInv.filter(t => !t.ia && t.imp !== "example" && t.imp !== "house"), accts);
   const pl = S.period==="all" ? "all time" : S.period==="l12" ? "last 12 months" : monthLabel(S.period);
   $("#invSum").innerHTML = `
     <div><span class="label">Total value</span><span class="big">${money(value)}</span><span class="delta">latest value you saved for each</span></div>
@@ -1244,13 +1424,55 @@ function renderInvest(periodTx){
       <td>${r.last?money(r.last.v):"—"}</td><td>${money(r.per)}</td><td>${money(r.all)}</td><td>${spark(r.hist)||'<span class="muted">—</span>'}</td></tr>`).join("")}
   </tbody></table>`;
   const sel = $("#invAcct"), cur = sel.value;
-  const opts = [...new Set([...BROKERS, ...vals.map(v=>v.acct)])];
-  sel.innerHTML = opts.map(a=>`<option>${esc(a)}</option>`).join("") + `<option value="__other">Other…</option>`;
+  const opts = accts;
+  sel.innerHTML = opts.map(a=>`<option>${esc(a)}</option>`).join("") + `<option value="__other">New account…</option>`;
   sel.value = opts.includes(cur) || cur==="__other" ? cur : BROKERS[0];
   if(!$("#invDate").value) $("#invDate").value = new Date().toISOString().slice(0,10);
   $("#invHistWrap").hidden = !vals.length;
   $("#invHist").innerHTML = vals.slice().reverse().map(v => `<div><span>${esc(v.acct)}</span><span class="muted">${shortDate(v.d)}</span><span class="num">${money(v.v,true)}</span><button class="x" data-inv-del="${esc(v.id)}" aria-label="Delete this value">×</button></div>`).join("");
 }
+function renderInvNeed(list, accts){
+  const box = $("#invNeed");
+  box.hidden = !list.length; if(!list.length){ box.innerHTML = ""; return; }
+  const sorted = list.slice().sort((a,b)=>b.d.localeCompare(a.d)), shown = sorted.slice(0, 40);
+  const opts = sel => [...new Set([...accts, sel].filter(Boolean))].map(a=>`<option ${a===sel?"selected":""}>${esc(a)}</option>`).join("") + `<option value="__new">New account…</option>`;
+  box.innerHTML = `<h3>${list.length} investment ${list.length===1?"transaction needs":"transactions need"} an account</h3>
+    <span class="inc-note">Pick the account each one went into (e.g. “Fidelity 401(k)”). They count in the “Put in” totals above, but not under any account until you save.</span>
+    ${shown.map(t => { const guess = brokerOf(t.s), like = list.filter(x => x !== t && invKey(x) === invKey(t)).length;
+      return `<div class="need-row" data-imp="${esc(t.imp)}" data-id="${esc(t.id)}">
+        <span class="what">${esc(t.s)}<small>${shortDate(t.d)} · ${esc(t.acct)}</small></span>
+        <span class="amt">${money(t.a,true)}</span>
+        <select data-ia-sel aria-label="Investment account">${guess ? "" : `<option value="" selected disabled>Choose account…</option>`}${opts(guess)}</select>
+        <input type="text" data-ia-new placeholder="Account name" aria-label="New account name" hidden>
+        <button type="button" class="btn small primary" data-ia-save>Save</button>
+        ${like ? `<button type="button" class="btn small" data-ia-save="like">Save for all ${like+1} like this</button>` : ""}
+      </div>`; }).join("")}
+    ${list.length > shown.length ? `<span class="inc-note">…and ${list.length - shown.length} more. Saving one with “for all like this” clears similar ones together.</span>` : ""}`;
+}
+$("#invNeed").addEventListener("change", e => {
+  if(!e.target.matches("[data-ia-sel]")) return;
+  const inp = e.target.closest(".need-row").querySelector("[data-ia-new]");
+  inp.hidden = e.target.value !== "__new"; if(!inp.hidden) inp.focus();
+});
+$("#invNeed").addEventListener("click", e => {
+  const b = e.target.closest("[data-ia-save]"); if(!b) return;
+  const row = b.closest(".need-row"), sel = row.querySelector("[data-ia-sel]").value;
+  const ia = sel === "__new" ? row.querySelector("[data-ia-new]").value.trim() : sel;
+  if(!ia){ toast(sel === "__new" ? "Type the new account’s name." : "Choose an account first."); return; }
+  const t0 = TX.find(t => t.imp === row.dataset.imp && t.id === row.dataset.id); if(!t0) return;
+  const targets = b.dataset.iaSave === "like" ? TX.filter(t => t.cat === "Investments" && !t.ia && invKey(t) === invKey(t0)) : [t0];
+  const byDoc = {};
+  for(const t of targets) (byDoc[t.imp] = byDoc[t.imp] || []).push(t.id);
+  const before = {};
+  for(const [imp, ids] of Object.entries(byDoc)){
+    if(!S.docs[imp]) continue;
+    before[imp] = structuredClone(S.docs[imp]);
+    const doc = structuredClone(S.docs[imp]), want = new Set(ids);
+    for(const t of doc.txns) if(want.has(t.id)) t.ia = ia;
+    putDoc(imp, doc);
+  }
+  toast(`${targets.length} ${targets.length===1?"transaction":"transactions"} saved to ${ia}.`, () => { for(const [imp, d] of Object.entries(before)) putDoc(imp, d); }, "Undo");
+});
 $("#invAcct").addEventListener("change", e => { $("#invOtherWrap").hidden = e.target.value !== "__other"; });
 $("#invForm").addEventListener("submit", e => {
   e.preventDefault();
@@ -1362,6 +1584,7 @@ async function refreshHouse(){
   try{
     const parsed = S.fbUser ? await readHouseWithSheetsApi() : await readHouseWithMcp();
     await S.houseDb.set({sheetId:HOUSE_SHEET.id, tab:HOUSE_SHEET.tab, readAt:new Date().toISOString(), ...parsed});
+    logChange(`Read ${parsed.rows.length} house costs from the house sheet`);
     toast(`Read ${parsed.rows.length} house costs from the sheet.`);
   }catch(e){
     const c = e && e.code;
@@ -1767,6 +1990,13 @@ function importStage(st){
   toast(`Imported ${fresh.length} transactions from ${st.name}.`);
   if(S.stages.every(s=>s.imported || !s.txns.length)) setTimeout(()=>{ if(S.stages.every(s=>s.imported)){ $("#importer").hidden = true; S.stages = []; renderStages(); } }, 900);
 }
+
+$("#undoBtn").onclick = undoLast;
+document.addEventListener("keydown", e => {
+  if((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !e.target.closest("input, textarea, select, [contenteditable]")){ e.preventDefault(); undoLast(); }
+});
+$("#histWho").onchange = e => { S.histWho = e.target.value; S.histN = 100; renderHistory(); };
+$("#histLog").addEventListener("click", e => { if(e.target.id === "histMore"){ S.histN += 100; renderHistory(); } });
 
 /* ---------- boot ---------- */
 renderAll();

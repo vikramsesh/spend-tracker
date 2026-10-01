@@ -10,8 +10,20 @@ service cloud.firestore {
         && request.auth.token.email in ['first.person@gmail.com', 'second.person@gmail.com'];
     }
 
-    match /books/shared/{path=**} {
+    // Statements, settings, investment values and the house sheet copy
+    match /books/shared/docs/{id} {
       allow read, write: if isMember();
+    }
+    match /books/shared/meta/{id} {
+      allow read, write: if isMember();
+    }
+
+    // Change history: anyone in the book can add an entry under their own email;
+    // nobody can edit or delete past entries.
+    match /books/shared/log/{id} {
+      allow read: if isMember();
+      allow create: if isMember() && request.resource.data.email == request.auth.token.email;
+      allow update, delete: if false;
     }
   }
 }
