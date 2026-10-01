@@ -7,6 +7,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <style>
 /* Layout: ledger strip of totals up top, two-column analysis (categories | trend + merchants), full-width register of entries below. */
 :root{
@@ -441,7 +444,7 @@ function loadHidden(){ try{ return new Set(JSON.parse(localStorage.getItem("spen
 function saveHidden(){ try{ localStorage.setItem("spendbook-hidden", JSON.stringify([...S.hiddenCats])); }catch(e){} }
 const S = {
   house:null, houseDb:null, mcp:null, houseBusy:false,
-  docs:{}, loaded:false, mode:"memory",
+  docs:{}, loaded:false, mode:"memory", fbUser:null, localCopy:null,
   period:null, account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), catFilter:"", search:"", showN:150,
   stages:[], sample:null, downloads:null, imgLimits:null,
 };
@@ -551,20 +554,28 @@ const titleCase = s => s.toLowerCase().replace(/\b[a-z]/g, c=>c.toUpperCase());
 
 /* ---------- storage ---------- */
 const LS_KEY = "spendbook-v1";
+/* Shared book: paste the web app config from Firebase console → Project settings → Your apps.
+   These values are not secret; who can read and write is decided by firestore.rules.
+   Leave apiKey empty to keep data in this browser only. */
+const FIREBASE_CONFIG = { apiKey:"AIzaSyB3veBoCLTHyfzf3ad3QbgcSTvdNX8eSMc", authDomain:"spendbook-2360d.firebaseapp.com", projectId:"spendbook-2360d", appId:"1:940029867354:web:315eea7ed0db1be17c6f63" };
+const BOOK = "books/shared";
 const writeChains = {};
 let col = null;
 function persistLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S.docs)); }catch(e){} }
+function localDocs(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||"{}") || {}; }catch(e){ return {}; } }
 async function putDoc(id, data){
+  if(S.mode === "signin"){ toast("Sign in to save to the shared book."); return; }
   S.docs[id] = data; renderAll();
   if(S.mode === "cloud"){
     const prev = writeChains[id] || Promise.resolve();
     writeChains[id] = prev.then(() => col.doc(id).set(data)).catch(e => {
-      toast(e && e.code === "quota_exceeded" ? "Storage is full. Delete an old statement to make room." : "Couldn’t save that change. Check your connection and try again.");
+      toast(e && e.code === "quota_exceeded" ? "Storage is full. Delete an old statement to make room." : e && e.code === "permission-denied" ? "This account can’t change the shared book." : "Couldn’t save that change. Check your connection and try again.");
     });
     return writeChains[id];
   } else if(S.mode === "local") persistLocal();
 }
 async function delDoc(id){
+  if(S.mode === "signin"){ toast("Sign in to change the shared book."); return; }
   delete S.docs[id]; renderAll();
   if(S.mode === "cloud"){
     const prev = writeChains[id] || Promise.resolve();
@@ -574,11 +585,63 @@ async function delDoc(id){
 }
 function setBadge(){
   const b = $("#storeBadge");
-  if(S.mode === "cloud") b.innerHTML = `<span class="dot ok"></span>Saved privately to your Claude account`;
+  if(S.mode === "cloud" && S.fbUser){
+    const n = S.localCopy ? Object.keys(S.localCopy).length : 0;
+    b.innerHTML = `<span class="dot ok"></span>Shared book · ${esc(S.fbUser.email)} <button class="linkbtn" data-fb="out">Sign out</button>`
+      + (n ? ` · <button class="linkbtn" data-fb="copy">Copy ${n} saved item${n>1?"s":""} from this browser</button>` : "");
+  }
+  else if(S.mode === "signin") b.innerHTML = `<span class="dot"></span>Not signed in <button class="btn small" data-fb="in">Sign in with Google</button>`;
+  else if(S.mode === "cloud") b.innerHTML = `<span class="dot ok"></span>Saved privately to your Claude account`;
   else if(S.mode === "local") b.innerHTML = `<span class="dot"></span>Saved in this browser only`;
   else b.innerHTML = `<span class="dot"></span>Connecting…`;
 }
+function initFirebase(){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  const fs = firebase.firestore();
+  fs.settings({ignoreUndefinedProperties:true});
+  fs.enablePersistence({synchronizeTabs:true}).catch(() => {});
+  const auth = firebase.auth();
+  let unsubs = [];
+  $("#storeBadge").addEventListener("click", async e => {
+    const act = e.target.closest("[data-fb]")?.dataset.fb;
+    if(act === "in"){
+      try{ await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+      catch(err){ if(err && err.code !== "auth/popup-closed-by-user" && err.code !== "auth/cancelled-popup-request") toast("Couldn’t sign in. " + (err.message||"")); }
+    } else if(act === "out") auth.signOut();
+    else if(act === "copy" && S.localCopy){
+      const local = S.localCopy; S.localCopy = null; setBadge();
+      for(const [id, data] of Object.entries(local)) putDoc(id, data);
+      toast("Copied this browser’s data into the shared book.");
+    }
+  });
+  auth.onAuthStateChanged(u => {
+    unsubs.forEach(f => f()); unsubs = [];
+    S.fbUser = u; S.localCopy = null; S.house = null;
+    if(!u){ col = null; S.houseDb = null; S.docs = {}; S.mode = "signin"; S.loaded = true; setBadge(); renderAll(); return; }
+    col = fs.collection(BOOK + "/docs");
+    S.houseDb = fs.doc(BOOK + "/meta/house");
+    S.mode = "cloud"; S.loaded = false; setBadge();
+    const denied = err => toast(err && err.code === "permission-denied"
+      ? `${u.email} doesn’t have access to this spend book. Ask the owner to add it, then sign in again.`
+      : "Lost the connection to the shared book. Reload the page to reconnect.");
+    let checked = false;
+    unsubs.push(S.houseDb.onSnapshot(d => { S.house = d.exists ? d.data() : null; renderAll(); }, () => {}));
+    unsubs.push(col.onSnapshot({includeMetadataChanges:true}, snap => {
+      const m = {};
+      snap.docs.forEach(d => { m[d.id] = d.data(); });
+      S.docs = m; S.loaded = true;
+      /* first time the server answers with an empty book: offer what this browser saved before */
+      if(!checked && !snap.metadata.fromCache){
+        checked = true;
+        const local = localDocs();
+        if(snap.empty && Object.keys(local).length){ S.localCopy = local; setBadge(); }
+      }
+      renderAll();
+    }, denied));
+  });
+}
 async function initStore(){
+  if(FIREBASE_CONFIG.apiKey && window.firebase){ initFirebase(); return; }
   const C = window.claude;
   let db = null, user = null, uid = null;
   try{

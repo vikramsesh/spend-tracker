@@ -1,0 +1,17 @@
+rules_version = '2';
+
+// Only the Google accounts listed here can read or change the shared spend book.
+// Replace the two addresses, then paste this into Firebase console → Firestore → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isMember() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['first.person@gmail.com', 'second.person@gmail.com'];
+    }
+
+    match /books/shared/{path=**} {
+      allow read, write: if isMember();
+    }
+  }
+}

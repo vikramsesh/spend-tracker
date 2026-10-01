@@ -1,4 +1,5 @@
 # Statements and exports should never be committed
+statements/
 *.csv
 *.xls
 *.xlsx
