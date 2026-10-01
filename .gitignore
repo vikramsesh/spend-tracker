@@ -1,0 +1,15 @@
+# Statements and exports should never be committed
+*.csv
+*.xls
+*.xlsx
+*.pdf
+*.ofx
+*.qfx
+spendbook-*.json
+
+# Local tooling
+.claude/
+node_modules/
+.DS_Store
+Thumbs.db
+desktop.ini
