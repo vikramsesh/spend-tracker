@@ -1611,9 +1611,14 @@ function parsePdfText(st){
       if(bal) prevBal = bal.v;
     } else amtTok = ams[0];
     const p = parseAmount(amtTok.raw + (amtTok.suf?" "+amtTok.suf:"")); if(!p || !p.v) continue;
-    if(!dir){ if(/^c/i.test(amtTok.suf) || p.cr) dir = "cr"; else if(/^d/i.test(amtTok.suf)) dir = "dr"; else if(/payment received|thank you|refund|reversal|cashback|salary|credited|neft cr|imps cr|upi cr|\bcr\b/i.test(desc)) dir = "cr"; else dir = p.neg ? "cr" : "dr"; }
+    if(!dir){ if(/^c/i.test(amtTok.suf) || p.cr) dir = "cr"; else if(/^d/i.test(amtTok.suf)) dir = "dr"; else if(/payment received|thank you|refund|reversal|cashback|salary|credited|neft cr|imps cr|upi cr|\bcr\b/i.test(desc)) dir = "cr"; else { out.push({id:rid(), d, s:desc.slice(0,200), v:p.v, neg:p.neg, bySign:true}); continue; } }
     out.push({id:rid(), d, s:desc.slice(0,200), a: dir==="cr" ? -p.v : p.v});
   }
+  /* rows with no Dr/Cr marker or running balance: their direction is the minus sign, which you confirm */
+  st.needsSign = out.some(t => t.bySign && t.neg);
+  const mode = st.signMode === "auto" ? "posIsSpend" : st.signMode;
+  st.resolvedSign = mode;
+  for(const t of out) if(t.bySign){ const signed = t.neg ? -t.v : t.v; t.a = Math.round((mode==="negIsSpend" ? -signed : signed)*100)/100; delete t.v; delete t.neg; delete t.bySign; }
   st.txns = out; st.method = "pdf";
   finishStage(st);
 }
@@ -1646,7 +1651,7 @@ async function claudeRead(st){
       if(!d || !isFinite(v) || !v) continue;
       out.push({id:rid(), d, s:String(it.description||"(no description)").slice(0,200), a: it.direction==="credit" ? -v : v});
     }
-    st.txns = out; st.method = "claude"; finishStage(st);
+    st.txns = out; st.method = "claude"; st.needsSign = false; finishStage(st);
     if(out.length) st.status += " · read by Claude, check a few rows before importing";
   }catch(e){
     const c = e && e.code;
@@ -1666,8 +1671,10 @@ function renderStages(){
         ${[["date","Date"],["desc","Description"],["amount","Amount (one column)"],["debit","Money out (debit)"],["credit","Money in (credit)"],["type","Dr/Cr column"]].map(([k,l]) =>
           `<label class="field"><span>${l}</span><select data-map="${k}">${colOpts(st.map?.[k])}</select></label>`).join("")}
       </div>
-      ${st.needsSign ? `<div class="row"><span class="muted" style="font-size:.88rem">In this file, spends are shown as</span>
-        <span class="seg" data-sign><button data-v="posIsSpend" class="${st.resolvedSign==="posIsSpend"?"on":""}">positive amounts</button><button data-v="negIsSpend" class="${st.resolvedSign==="negIsSpend"?"on":""}">negative amounts</button></span></div>` : ""}` : "";
+      ` : "";
+    const signUI = st.needsSign ? `<div class="field"><span>In this file, negative amounts (−) are</span>
+      <div class="row"><span class="seg" data-sign><button type="button" data-v="posIsSpend" class="${st.signMode==="posIsSpend"?"on":""}">Credits (money in)</button><button type="button" data-v="negIsSpend" class="${st.signMode==="negIsSpend"?"on":""}">Debits (money out)</button></span>
+      ${needsAnswer(st) ? `<span class="need">Answer before importing. Best guess: ${st.resolvedSign==="negIsSpend"?"debits":"credits"}.</span>` : ""}</div></div>` : "";
     const prev = st.txns.length ? `<div class="preview"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>
       ${st.txns.slice(0,8).map(t=>`<tr><td>${shortDate(t.d)}</td><td>${esc(t.s.slice(0,60))}</td><td>${esc(effCat(t))}</td><td class="n ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)} ${drcr(t.a)}</td></tr>`).join("")}
       </tbody></table></div>${st.txns.length>8?`<span class="muted" style="font-size:.82rem">…and ${st.txns.length-8} more</span>`:""}` : "";
@@ -1683,10 +1690,10 @@ function renderStages(){
       </div>
       ${st.needsPassword ? `<form class="row" data-pw><input type="password" placeholder="PDF password" aria-label="PDF password" autocomplete="off"><button class="btn small">Unlock</button></form>` : ""}
       <div class="status ${st.statusKind}">${st.busy?'<span class="spin"></span> ':""}${esc(st.status)}${dups?` · ${dups} already imported for this card (will be skipped)`:""}</div>
-      ${mapUI}${prev}
+      ${mapUI}${signUI}${prev}
       <div class="row">
         ${canClaude ? `<button class="btn small" data-claude>${st.kind==="image"?"Read with Claude":st.method==="claude"?"Read again with Claude":"Have Claude read it instead"}</button>` : ""}
-        ${st.txns.length ? `<button class="btn small primary" data-import ${st.account.trim()?"":"disabled"}>Import ${st.txns.length - dups} transactions</button>` : ""}
+        ${st.txns.length ? `<button class="btn small primary" data-import ${canImport(st)?"":"disabled"}>Import ${st.txns.length - dups} transactions</button>` : ""}
       </div>`}
     </div>`;
   }).join("");
@@ -1697,25 +1704,29 @@ $("#stages").addEventListener("change", e => {
   if(e.target.dataset.map){ const k = e.target.dataset.map; if(e.target.value==="") delete st.map[k]; else st.map[k] = +e.target.value; buildTable(st); renderStages(); }
   if(e.target.dataset.acct !== undefined) renderStages();
 });
-$("#stages").addEventListener("input", e => { const st = stageOf(e.target); if(st && e.target.dataset.acct!==undefined){ st.account = e.target.value; const b = e.target.closest(".stage").querySelector("[data-import]"); if(b) b.disabled = !st.account.trim(); const nd = e.target.closest(".field").querySelector(".need"); if(nd) nd.hidden = !!st.account.trim(); } });
+$("#stages").addEventListener("input", e => { const st = stageOf(e.target); if(st && e.target.dataset.acct!==undefined){ st.account = e.target.value; const b = e.target.closest(".stage").querySelector("[data-import]"); if(b) b.disabled = !canImport(st); const nd = e.target.closest(".field").querySelector(".need"); if(nd) nd.hidden = !!st.account.trim(); } });
 $("#stages").addEventListener("submit", e => { e.preventDefault(); const st = stageOf(e.target); const pw = e.target.querySelector("input").value; st.status = "Unlocking…"; renderStages(); readPdf(st, pw).catch(()=>{ st.status="Couldn’t open this PDF."; st.statusKind="err"; }).finally(renderStages); });
 $("#stages").addEventListener("click", e => {
   const st = stageOf(e.target); if(!st) return;
   const cb = e.target.closest("[data-card]");
   if(cb){ if(cb.dataset.card==="__other"){ st.other = true; if(CARDS.includes(st.account)) st.account = ""; } else { st.other = false; st.account = cb.dataset.card; } renderStages(); if(st.other) document.querySelector(`[data-st="${st.id}"] [data-acct]`)?.focus(); return; }
   if(e.target.closest("[data-rm]")){ S.stages = S.stages.filter(s=>s!==st); renderStages(); }
-  const sb = e.target.closest("[data-sign] button"); if(sb){ st.signMode = sb.dataset.v; buildTable(st); renderStages(); }
+  const sb = e.target.closest("[data-sign] button"); if(sb){ st.signMode = sb.dataset.v; if(st.method==="pdf") parsePdfText(st); else buildTable(st); renderStages(); }
   if(e.target.closest("[data-claude]")) claudeRead(st);
   if(e.target.closest("[data-import]")) importStage(st);
 });
 $("#importAll").onclick = () => {
   const ready = S.stages.filter(s=>s.txns.length && !s.imported);
-  const missing = ready.filter(s=>!s.account.trim());
-  ready.filter(s=>s.account.trim()).forEach(importStage);
+  const missing = ready.filter(s=>!s.account.trim()), unsure = ready.filter(s=>s.account.trim() && needsAnswer(s));
+  ready.filter(canImport).forEach(importStage);
   if(missing.length) toast(`Pick the card for ${missing.map(s=>s.name).join(", ")} to import ${missing.length>1?"them":"it"}.`);
+  if(unsure.length) toast(`Say whether negative amounts are credits or debits in ${unsure.map(s=>s.name).join(", ")}.`);
 };
+const needsAnswer = st => !!st.needsSign && st.signMode === "auto";
+const canImport = st => !!st.account.trim() && !needsAnswer(st);
 function importStage(st){
   const account = (st.account||"").trim(); if(!account){ toast("Pick which card this statement is from."); return; }
+  if(needsAnswer(st)){ toast("Say whether negative amounts in this file are credits or debits."); return; }
   const fresh = freshTxns(st);
   if(!fresh.length){ st.status = "Everything in this file is already imported for this card."; st.statusKind="warn"; renderStages(); return; }
   for(let i=0;i<fresh.length;i+=1200){
