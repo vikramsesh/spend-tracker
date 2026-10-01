@@ -950,7 +950,7 @@ function renderRegister(list){
 }
 function houseBlock(){
   const hr = houseRows(), h = S.house;
-  const canRead = S.mcp && S.houseDb;
+  const canRead = (S.mcp || S.fbUser) && S.houseDb;
   const btn = canRead ? `<button class="btn small" id="houseRefresh" ${S.houseBusy?"disabled":""}>${S.houseBusy?'<span class="spin"></span> Reading…':(hr.length?"Refresh from sheet":"Read the sheet")}</button>` : "";
   if(!hr.length) return canRead ? `<div class="imp"><div style="min-width:0"><div class="t">House cost sheet</div><small>Not read yet. Pulls paid, dated rows from the “House cost” tab.</small></div>${btn}</div>` : "";
   const ds = hr.map(t=>t.d).sort(), tot = hr.reduce((s,t)=>s+t.a,0);
@@ -1257,7 +1257,10 @@ function parseHouseSheet(text){
   if(start < 0) throw new Error(`Couldn’t find a tab named “${HOUSE_SHEET.tab}” in the sheet.`);
   const sect = text.slice(start + 5).split("\n### Sheet Name: ")[0];
   const lines = sect.split("\n").map(l=>l.trim()).filter(l => l.startsWith("|"));
-  const cells = lines.map(l => l.replace(/^\|/,"").replace(/\|$/,"").split(/(?<!\\)\|/).map(c => c.trim().replace(/\\(.)/g,"$1")));
+  return parseHouseCells(lines.map(l => l.replace(/^\|/,"").replace(/\|$/,"").split(/(?<!\\)\|/).map(c => c.trim().replace(/\\(.)/g,"$1"))));
+}
+function parseHouseCells(cells){
+  cells = cells.map(r => r.map(c => String(c ?? "").trim()));
   const hi = cells.findIndex(r => r.some(c=>/^description$/i.test(c)) && r.some(c=>/^cost$/i.test(c)));
   if(hi < 0) throw new Error("The House cost tab doesn’t have Description and Cost columns.");
   const col = re => cells[hi].findIndex(c => re.test(c));
@@ -1276,19 +1279,47 @@ function parseHouseSheet(text){
   });
   return {rows, pending, undated};
 }
+/* hosted version: read the tab with the signed-in Google account (needs the Google Sheets API turned on) */
+let sheetsToken = null;
+async function readHouseWithSheetsApi(){
+  if(!sheetsToken || Date.now() > sheetsToken.exp){
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.addScope("https://www.googleapis.com/auth/spreadsheets.readonly");
+    provider.setCustomParameters({login_hint: S.fbUser.email});
+    const res = await firebase.auth().currentUser.reauthenticateWithPopup(provider);
+    sheetsToken = {value: res.credential.accessToken, exp: Date.now() + 50*60*1000};
+  }
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${HOUSE_SHEET.id}/values/${encodeURIComponent("'" + HOUSE_SHEET.tab + "'")}`;
+  const r = await fetch(url, {headers:{Authorization: "Bearer " + sheetsToken.value}});
+  if(!r.ok){
+    if(r.status === 401) sheetsToken = null;
+    const msg = ((await r.json().catch(() => null)) || {}).error?.message || "";
+    throw new Error(r.status === 403 && /has not been used|is disabled/i.test(msg) ? "Turn on the Google Sheets API for this Firebase project, then try again."
+      : r.status === 403 || r.status === 404 ? `${S.fbUser.email} can’t open the house cost sheet. Share the sheet with this account, then try again.`
+      : r.status === 400 ? `Couldn’t find a tab named “${HOUSE_SHEET.tab}” in the sheet.`
+      : "Couldn’t read the sheet. Try again in a moment.");
+  }
+  return parseHouseCells((await r.json()).values || []);
+}
+async function readHouseWithMcp(){
+  const r = await S.mcp.callTool("Google Drive", "read_file_content", {fileId: HOUSE_SHEET.id}, {cache:false});
+  const p = r.payload;
+  const text = (p && typeof p === "object" && p.fileContent) || (typeof p === "string" ? p : (r.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n"));
+  return parseHouseSheet(String(text||""));
+}
 async function refreshHouse(){
-  if(!S.mcp || !S.houseDb || S.houseBusy) return;
+  if(!(S.mcp || S.fbUser) || !S.houseDb || S.houseBusy) return;
   S.houseBusy = true; renderImports();
   try{
-    const r = await S.mcp.callTool("Google Drive", "read_file_content", {fileId: HOUSE_SHEET.id}, {cache:false});
-    const p = r.payload;
-    const text = (p && typeof p === "object" && p.fileContent) || (typeof p === "string" ? p : (r.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n"));
-    const parsed = parseHouseSheet(String(text||""));
+    const parsed = S.fbUser ? await readHouseWithSheetsApi() : await readHouseWithMcp();
     await S.houseDb.set({sheetId:HOUSE_SHEET.id, tab:HOUSE_SHEET.tab, readAt:new Date().toISOString(), ...parsed});
     toast(`Read ${parsed.rows.length} house costs from the sheet.`);
   }catch(e){
     const c = e && e.code;
-    toast(c==="server_not_connected" ? "Connect Google Drive in claude.ai Settings → Connectors, then try again."
+    toast(c==="auth/popup-closed-by-user" || c==="auth/cancelled-popup-request" ? "Sheet not read: the Google window was closed."
+      : c==="auth/popup-blocked" ? "Allow pop-ups for this site so Google can ask to read the sheet."
+      : c==="auth/user-mismatch" ? `Choose ${S.fbUser.email} in the Google window, the account you’re signed in with.`
+      : c==="server_not_connected" ? "Connect Google Drive in claude.ai Settings → Connectors, then try again."
       : c==="needs_reauth" ? "Reconnect Google Drive in claude.ai Settings → Connectors, then try again."
       : c==="not_granted" || c==="cancelled" ? "Spendbook needs permission to read the sheet from Google Drive."
       : (e && e.message && !c) ? e.message : "Couldn’t read the sheet. Try again in a moment.");
