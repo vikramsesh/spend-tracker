@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "a476731d-11b9-48fc-bb11-1ce3564b3f67",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\Vikram\\OneDrive\\Documents\\Projects\\spend-tracker\\.archify\\architecture-spendbook-20261006-161559\\candidate.json",
+  "output": "C:\\Users\\Vikram\\OneDrive\\Documents\\Projects\\spend-tracker\\.archify\\architecture-spendbook-20261006-161559\\spendbook.html",
+  "specification": {
+    "sha256": "3548eed779cd51cfccc19128073ba9d5484adbc1bc15ef9bf33efdaaecef63ca",
+    "bytes": 5527
+  },
+  "artifact": {
+    "sha256": "326520dad7f4c07f002d1e0120edb7edbd96d277ba3920541ba1e80f2d3c8a56",
+    "bytes": 764927
+  }
+}

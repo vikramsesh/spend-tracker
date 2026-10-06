@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Spendbook: shared spend tracker",
+    "output": ".archify/architecture-spendbook-20261006-161559/spendbook.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/vikramsesh/spend-tracker.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "a1b4d0bf508c715f7be6fb79486acb389a3e0016"
+    }
+  },
+  "components": [
+    {
+      "id": "members", "type": "external", "label": "Book members", "sublabel": "allow-listed Google accounts",
+      "pos": [40, 300], "size": [170, 64],
+      "sources": [
+        { "path": "firestore.rules", "line": 7, "end_line": 11, "label": "isMember allow-list" },
+        { "path": "README.md", "line": 3, "label": "shared book" }
+      ]
+    },
+    {
+      "id": "pages", "type": "cloud", "label": "GitHub Pages", "sublabel": "static host",
+      "pos": [300, 300], "size": [130, 64],
+      "sources": [ { "path": "README.md", "line": 27, "end_line": 32, "label": "hosting setup" } ]
+    },
+    {
+      "id": "app", "type": "frontend", "label": "Spendbook page", "sublabel": "spendbook.html in browser",
+      "pos": [540, 300], "size": [170, 64],
+      "sources": [
+        { "path": "spendbook.html", "line": 1097, "label": "renderAll" },
+        { "path": "spendbook.html", "line": 1052, "label": "allTxns: categories, repeats" },
+        { "path": "spendbook.html", "line": 766, "label": "undoLast" }
+      ]
+    },
+    {
+      "id": "firestore", "type": "database", "label": "Cloud Firestore", "sublabel": "books/shared",
+      "pos": [880, 300], "size": [150, 64], "tag": "docs · meta · log",
+      "sources": [
+        { "path": "spendbook.html", "line": 722, "end_line": 743, "label": "putDoc / delDoc" },
+        { "path": "spendbook.html", "line": 882, "end_line": 898, "label": "collections + onSnapshot" },
+        { "path": "firestore.rules", "line": 14, "end_line": 32, "label": "access rules" }
+      ]
+    },
+    {
+      "id": "auth", "type": "security", "label": "Firebase Auth", "sublabel": "Google sign-in",
+      "pos": [880, 120], "size": [150, 64],
+      "sources": [ { "path": "spendbook.html", "line": 859, "end_line": 884, "label": "initFirebase" } ]
+    },
+    {
+      "id": "sheets", "type": "cloud", "label": "Google Sheets API", "sublabel": "house cost tab",
+      "pos": [290, 120], "size": [150, 64],
+      "sources": [
+        { "path": "spendbook.html", "line": 1769, "end_line": 1788, "label": "readHouseWithSheetsApi" },
+        { "path": "spendbook.html", "line": 1797, "end_line": 1811, "label": "approve + store sheet" }
+      ]
+    },
+    {
+      "id": "statements", "type": "external", "label": "Statement files", "sublabel": "CSV · XLSX · PDF",
+      "pos": [880, 470], "size": [150, 64],
+      "sources": [
+        { "path": "spendbook.html", "line": 1921, "label": "XLSX.read" },
+        { "path": "spendbook.html", "line": 2059, "label": "parsePdfText" },
+        { "path": "spendbook.html", "line": 2205, "label": "importStage" }
+      ]
+    },
+    {
+      "id": "cdn", "type": "cloud", "label": "Script CDNs", "sublabel": "SheetJS · pdf.js · Firebase SDK",
+      "pos": [270, 470], "size": [190, 64], "tag": "SRI pinned",
+      "sources": [ { "path": "spendbook.html", "line": 7, "end_line": 12, "label": "script tags" } ]
+    }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Firebase project", "wraps": ["auth", "firestore"] },
+    { "kind": "security-group", "label": "rules: verified, allow-listed emails", "wraps": ["firestore"] }
+  ],
+  "connections": [
+    { "id": "open-page", "from": "members", "to": "pages", "label": "HTTPS", "variant": "emphasis" },
+    { "id": "serve-page", "from": "pages", "to": "app", "label": "serves page", "variant": "emphasis" },
+    { "id": "sync-book", "from": "app", "to": "firestore", "label": "writes · live sync", "variant": "emphasis" },
+    { "id": "sign-in", "from": "app", "to": "auth", "label": "Google popup", "variant": "security", "fromSide": "top", "toSide": "left" },
+    { "id": "read-sheet", "from": "app", "to": "sheets", "label": "read tab (OAuth)", "variant": "security", "fromSide": "top", "toSide": "right" },
+    { "id": "import-files", "from": "statements", "to": "app", "label": "parsed in browser", "fromSide": "left", "toSide": "bottom" },
+    { "id": "load-scripts", "from": "app", "to": "cdn", "label": "load scripts", "variant": "dashed", "fromSide": "bottom", "toSide": "right" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Shared book", "items": [
+      "Statements, settings and investment values in books/shared/docs",
+      "House sheet copy in meta/house",
+      "Append-only change history in log, server-timestamped",
+      "Every open browser gets the other member's changes live"
+    ] },
+    { "dot": "cyan", "title": "In the browser", "items": [
+      "Statement files are parsed locally; only the parsed rows are saved",
+      "Categories fixed at import; repeats and house matches worked out on each render",
+      "Undo keeps the last 50 steps in memory"
+    ] },
+    { "dot": "rose", "title": "Security", "items": [
+      "Firestore rules allow only verified, allow-listed emails",
+      "Sheets token kept in memory for 50 minutes",
+      "A sheet set by someone else needs confirming per device",
+      "Data read back is shape-checked before rendering"
+    ] },
+    { "dot": "slate", "title": "Without Firebase", "items": [
+      "Data stays in this browser's localStorage only"
+    ] }
+  ]
+}
