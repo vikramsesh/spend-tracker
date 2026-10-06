@@ -139,6 +139,15 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 .hist{display:flex;flex-direction:column;font-size:.85rem}
 .hist div{display:grid;grid-template-columns:minmax(0,1fr) auto auto 2rem;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}
 .inc-note{font-size:.8rem;color:var(--muted)}
+.month-wrap{position:relative;display:inline-flex}
+.month-pick{position:absolute;top:calc(100% + 6px);right:0;z-index:15;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;width:300px;box-shadow:0 8px 24px rgb(0 0 0 / .18);display:flex;flex-direction:column;gap:8px}
+.month-pick[hidden]{display:none}
+.month-pick h4{margin:4px 0 0;font-size:.8rem;color:var(--muted);font-weight:600}
+.month-pick .mgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.month-pick label{display:flex;align-items:center;gap:4px;font-size:.85rem;padding:3px 4px;border-radius:6px;cursor:pointer}
+.month-pick label:hover{background:var(--sunk)}
+.month-pick .scroll{max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:4px}
+@media (max-width:560px){.month-pick{position:fixed;top:72px;left:16px;right:16px;width:auto}}
 .btn.undo{background:var(--danger);border-color:var(--danger);color:var(--surface)}
 .btn.undo:hover{filter:brightness(1.08);border-color:var(--danger)}
 #undoBtn .undo-what{max-width:220px;overflow:hidden;text-overflow:ellipsis;opacity:.85;font-size:.82rem}
@@ -282,6 +291,8 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
     <div class="toolbar">
       <label class="sr" for="period" hidden>Period</label>
       <select id="period" aria-label="Period"></select>
+      <span class="month-wrap"><button class="btn" id="monthsBtn" type="button" aria-haspopup="dialog" aria-expanded="false">Months…</button>
+        <div class="month-pick" id="monthPick" role="dialog" aria-label="Choose months" hidden></div></span>
       <select id="acctFilter" aria-label="Account"></select>
       <button class="btn primary" id="uploadBtn">Upload statements</button>
       <button class="btn undo" id="undoBtn" type="button" hidden><span aria-hidden="true">↶</span> Undo<span class="undo-what" id="undoWhat"></span></button>
@@ -355,6 +366,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <select id="regAcct" aria-label="Card or account filter"></select>
       <span class="range"><label for="dateFrom">From</label><input type="date" id="dateFrom"><label for="dateTo">to</label><input type="date" id="dateTo"></span>
       <span class="range"><label for="amtMin">Amount $</label><input type="number" id="amtMin" min="0" step="0.01" placeholder="min" inputmode="decimal"><label for="amtMax">to</label><input type="number" id="amtMax" min="0" step="0.01" placeholder="max" inputmode="decimal"></span>
+      <button class="btn small" id="repCheck" type="button" title="Look for the same charge twice within 3 days in all your statements">Check for repeats</button>
       <select id="regSort" aria-label="Sort transactions"><option value="date-desc">Newest first</option><option value="date-asc">Oldest first</option><option value="amt-desc">Largest amount first</option><option value="amt-asc">Smallest amount first</option></select>
       <span id="chips" class="row"></span>
     </div>
@@ -433,6 +445,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
             <dt><i class="sw" style="background:var(--muted)"></i>In house sheet</dt>
             <dd>Card or bank charges you’ve confirmed are already in the house cost sheet (via <b>Same payment: leave out</b>). Left out of every total; the sheet’s copy is what counts as House.</dd>
           </dl>
+          <p class="muted">A transaction’s category is set when it’s imported and only changes when you change it. New rules and keyword changes apply to statements you import afterwards.</p>
           <p class="muted"><b>Left over</b> = Money in − Spent − Invested. To change a transaction’s category, use its dropdown in the transaction list; choose <b>Always for…</b> to make a rule, and your rules always win over the built-in keywords. The full keyword lists are under <b>How sorting works</b>.</p>
         </div>
       </details>
@@ -530,7 +543,7 @@ function saveHidden(){ try{ localStorage.setItem("spendbook-hidden", JSON.string
 const S = {
   house:null, houseDb:null, mcp:null, houseBusy:false,
   docs:{}, loaded:false, mode:"memory", fbUser:null, localCopy:null, logCol:null, log:[], histWho:"all", histN:100,
-  period:null, account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), catFilter:"", search:"", dateFrom:"", dateTo:"", amtMin:null, amtMax:null, showN:150,
+  period:null, months:[], account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), catFilter:"", search:"", dateFrom:"", dateTo:"", amtMin:null, amtMax:null, showN:150,
   stages:[], sample:null, downloads:null, imgLimits:null,
 };
 const settings = () => Object.assign({currency:guessCurrency(), dateOrder:"auto", rules:[]}, S.docs.settings||{});
@@ -623,12 +636,29 @@ function builtinCat(desc, amt){
   return null;
 }
 function ruleCat(t){ const s = t.s.toLowerCase(); for(const r of settings().rules){ if(r.m && s.includes(r.m)) return normCat(r.c); } return null; }
+/* c = category you chose; ac = category fixed when the transaction was imported.
+   Keyword or rule changes never move an imported transaction; only you do. */
 function effCat(t){
   if(t.c) return normCat(t.c);
+  if(t.ac) return normCat(t.ac);
   return ruleCat(t) || builtinCat(t.s, t.a) || "Misc.";
 }
+function withAutoCat(t){
+  const c = ruleCat(t) || builtinCat(t.s, t.a);
+  return c ? {...t, ac:c} : {...t, ac:"Misc.", ...(t.a > 0 ? {u:1} : {})};
+}
 /* a spend nothing recognised: it lands in Misc. but is worth a look */
-const isUnsorted = t => !t.c && t.a > 0 && !ruleCat(t) && !builtinCat(t.s, t.a);
+const isUnsorted = t => !t.c && t.a > 0 && (t.ac ? !!t.u : (!ruleCat(t) && !builtinCat(t.s, t.a)));
+/* one-time: fix the category of transactions imported before categories were stored */
+function freezeExisting(){
+  if(S.frozen) return; S.frozen = true;
+  for(const d of importDocs()){
+    if(!(d.txns||[]).some(t => !t.c && !t.ac)) continue;
+    const doc = structuredClone(S.docs[d.id]);
+    doc.txns = doc.txns.map(t => t.c || t.ac ? t : withAutoCat(t));
+    putDoc(d.id, doc, {silent:true});
+  }
+}
 const STOP = new Set("UPI DR CR POS NEFT IMPS RTGS ACH ECOM ECS NACH MMT INB BIL ONL TXN REF PAYMENT PURCHASE DEBIT CREDIT CARD VISA MASTERCARD RUPAY INR USD TO FROM BY AT THE P2A P2M PVT LTD LIMITED INDIA PRIVATE WWW COM ONLINE PAY SI MANDATE TRANSFER PMT TRF TPT FT IB MB BRANCH NA AND FOR VIA IND BANK SENT RECEIVED COLLECT REQUEST".split(" "));
 function merchantKey(desc){
   const toks = String(desc).toUpperCase().split(/[^A-Z&.']+/).map(t=>t.replace(/^[.']+|[.']+$/g,"")).filter(t => t.length>=3 && !STOP.has(t) && !/^[A-Z]{4}0/.test(t));
@@ -648,9 +678,9 @@ const writeChains = {};
 let col = null;
 function persistLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S.docs)); }catch(e){} }
 function localDocs(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||"{}") || {}; }catch(e){ return {}; } }
-async function putDoc(id, data){
+async function putDoc(id, data, opt){
   if(S.mode === "signin"){ toast("Sign in to save to the shared book."); return; }
-  track(id, S.docs[id], data);
+  if(!(opt && opt.silent)) track(id, S.docs[id], data);
   S.docs[id] = data; renderAll();
   if(S.mode === "cloud"){
     const prev = writeChains[id] || Promise.resolve();
@@ -806,7 +836,7 @@ function initFirebase(){
   });
   auth.onAuthStateChanged(u => {
     unsubs.forEach(f => f()); unsubs = [];
-    S.fbUser = u; S.localCopy = null; S.house = null;
+    S.fbUser = u; S.localCopy = null; S.house = null; S.frozen = false;
     if(!u){ S.logCol = null; S.log = []; renderHistory(); col = null; S.houseDb = null; S.docs = {}; S.mode = "signin"; S.loaded = true; setBadge(); renderAll(); return; }
     col = fs.collection(BOOK + "/docs");
     S.logCol = fs.collection(BOOK + "/log");
@@ -827,6 +857,7 @@ function initFirebase(){
         checked = true;
         const local = localDocs();
         if(snap.empty && Object.keys(local).length){ S.localCopy = local; setBadge(); }
+        setTimeout(freezeExisting, 0);
       }
       renderAll();
     }, denied));
@@ -851,14 +882,14 @@ async function initStore(){
       col.onSnapshot(snap => {
         const m = {};
         snap.docs.forEach(d => { if(d.exists) m[d.id] = structuredClone(d.data()); });
-        S.docs = m; S.loaded = true; renderAll();
+        S.docs = m; S.loaded = true; renderAll(); freezeExisting();
       }, () => { toast("Lost the connection to your saved data. Reload the page to reconnect."); });
       return;
     }catch(e){}
   }
   S.mode = "local";
   try{ const raw = localStorage.getItem(LS_KEY); if(raw) S.docs = JSON.parse(raw) || {}; }catch(e){}
-  S.loaded = true; setBadge(); renderAll();
+  S.loaded = true; setBadge(); renderAll(); freezeExisting();
 }
 async function initClaude(){
   const C = window.claude; if(!C || !C.use) return;
@@ -973,9 +1004,17 @@ function totals(list){
     if(k==="spend") spent += t.a; else if(k==="in") inc -= t.a; else if(k==="invest") inv += t.a; }
   return {spent, inc, inv, net: inc - spent - inv};
 }
+/* label for the chosen period: one month, or several picked months */
+function periodName(){
+  if(S.period !== "multi") return monthLabel(S.period);
+  const ms = S.months;
+  if(ms.length <= 3) return ms.map(m => monthLabel(m)).join(", ");
+  return `${ms.length} months (${monthLabel(ms[0])} – ${monthLabel(ms[ms.length-1])})`;
+}
 function monthsOf(list){ return [...new Set(list.map(t=>t.d.slice(0,7)))].sort().reverse(); }
 function inPeriod(t, period, latest){
   if(period === "all") return true;
+  if(period === "multi") return S.months.includes(t.d.slice(0,7));
   if(period === "l12") return t.d.slice(0,7) > addMonths(latest,-12);
   return t.d.startsWith(period);
 }
@@ -989,8 +1028,10 @@ function renderAll(){
   $("#exampleBanner").hidden = !isExample();
   const months = monthsOf(TX); const latest = months[0] || new Date().toISOString().slice(0,7);
   if(!S.period || (S.period.length===7 && !months.includes(S.period))) S.period = months[0] || "all";
+  if(S.period === "multi"){ S.months = S.months.filter(m => months.includes(m)); if(S.months.length < 2) S.period = S.months[0] || months[0] || "all"; }
   const ps = $("#period");
-  ps.innerHTML = months.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join("") + `<option value="l12">Last 12 months</option><option value="all">All time</option>`;
+  ps.innerHTML = (S.period === "multi" ? `<option value="multi">${esc(periodName())}</option>` : "")
+    + months.map(m=>`<option value="${m}">${monthLabel(m)}</option>`).join("") + `<option value="l12">Last 12 months</option><option value="all">All time</option>`;
   ps.value = S.period;
   const accts = [...new Set(TX.map(t=>t.acct))].sort();
   if(S.account !== "all" && !accts.includes(S.account)) S.account = "all";
@@ -1002,7 +1043,7 @@ function renderAll(){
   const periodTx = acctTx.filter(t => inPeriod(t, S.period, latest));
   renderKPIs(periodTx, acctTx);
   renderCats(periodTx);
-  renderTrend(acctTx, S.period.length===7 ? S.period : latest);
+  renderTrend(acctTx, S.period.length===7 ? S.period : S.period==="multi" ? S.months[S.months.length-1] : latest, S.period==="multi" ? new Set(S.months) : null);
   renderMerchants(periodTx);
   renderSources(periodTx);
   renderTop(periodTx);
@@ -1036,7 +1077,7 @@ function renderCats(list){
   const rows = SPEND_CATS.map(c => [c, by[c]||0]).sort((a,b)=>b[1]-a[1]);
   const pos = rows.filter(([,v])=>v>0.005);
   const total = pos.reduce((s,r)=>s+r[1],0), max = pos[0]?.[1] || 1;
-  const pl = S.period==="all" ? "all time" : S.period==="l12" ? "the last 12 months" : monthLabel(S.period);
+  const pl = S.period==="all" ? "all time" : S.period==="l12" ? "the last 12 months" : periodName();
   $("#catNote").textContent = S.account==="all" ? "all accounts" : S.account;
   $("#overall").innerHTML = `<div class="total-line"><span class="big">${money(total)}</span><span class="muted">spent in ${esc(pl)}</span></div>
     ${total>0 ? `<div class="comp" role="img" aria-label="Share of spend by category">${pos.map(([c,v])=>`<i style="flex:${v} 1 0;background:${CAT_COLOR[c]}" title="${esc(c)}: ${money(v)} (${Math.round(v/total*100)}%)"></i>`).join("")}</div>` : ""}`;
@@ -1055,7 +1096,7 @@ function renderCats(list){
 }
 function niceMax(v){ if(v<=0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); for(const f of [1,1.5,2,2.5,3,4,5,6,8,10]) if(f*p >= v) return f*p; return 10*p; }
 function compact(v){ const cur = settings().currency; return new Intl.NumberFormat(CURRENCIES[cur]||"en-IN",{notation:"compact",maximumFractionDigits:1}).format(v); }
-function renderTrend(list, anchor){
+function renderTrend(list, anchor, picked){
   const months = []; for(let i=11;i>=0;i--) months.push(addMonths(anchor,-i));
   const stacks = months.map(m => { const by = {}; for(const t of list){ if(!t.d.startsWith(m) || CAT_KIND[t.cat]!=="spend") continue; by[t.cat]=(by[t.cat]||0)+t.a; } return by; });
   const shown = SPEND_CATS.filter(c => !S.hiddenCats.has(c)), showInc = !S.hiddenCats.has("Income");
@@ -1067,7 +1108,7 @@ function renderTrend(list, anchor){
   for(let i=0;i<=4;i++){ const y = T + ih - ih*i/4; const v = mx*i/4;
     g += `<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1" ${i?'stroke-dasharray="2 3"':""}/><text x="${L-6}" y="${y+3}" text-anchor="end">${compact(v)}</text>`; }
   months.forEach((m,i) => {
-    const x = L + i*bw + bw*0.16, w = bw*0.68, sel = m===anchor; let y = T+ih;
+    const x = L + i*bw + bw*0.16, w = bw*0.68, sel = picked ? picked.has(m) : m===anchor; let y = T+ih;
     for(const c of shown){ const v = Math.max(0, stacks[i][c]||0); if(!v) continue; const h = ih*v/mx; y -= h;
       g += `<rect x="${x}" y="${y}" width="${w}" height="${Math.max(h-0.8,0.6)}" fill="${CAT_COLOR[c]}" opacity="${sel?1:0.75}"><title>${monthLabel(m)} · ${c}: ${money(v)}</title></rect>`; }
     g += `<text x="${x+w/2}" y="${H-8}" text-anchor="middle" style="${sel?"fill:var(--fg);font-weight:600":""}">${MON_T[+m.slice(5)-1]}</text>`;
@@ -1096,7 +1137,7 @@ function renderTop(list){
   const by = {};
   for(const t of list){ if(CAT_KIND[t.cat]!=="spend" || t.a<=0) continue; (by[t.cat] = by[t.cat] || []).push(t); }
   const cats = SPEND_CATS.filter(c => by[c]);
-  $("#topNote").textContent = S.period==="all" ? "all time" : S.period==="l12" ? "last 12 months" : monthLabel(S.period);
+  $("#topNote").textContent = S.period==="all" ? "all time" : S.period==="l12" ? "last 12 months" : periodName();
   $("#tops").innerHTML = cats.length ? cats.map(c => {
     const items = by[c].slice().sort((a,b)=>b.a-a.a), tot = items.reduce((s,t)=>s+t.a,0);
     return `<div class="topcat"><h3><span><i class="sw" style="background:${CAT_COLOR[c]}"></i>${esc(c)}</span><span class="num">${money(tot)}</span></h3>
@@ -1257,7 +1298,7 @@ $("#reg").addEventListener("change", e => {
   if(key.length >= 3 && t.s.toLowerCase().includes(key)){
     toast(`Set to ${cat}.`, () => {
       const rules = settings().rules.filter(r=>r.m!==key); rules.unshift({m:key,c:cat}); saveSettings({rules});
-      toast(`Anything mentioning “${key}” now goes to ${cat}.`);
+      toast(`From now on, imported transactions mentioning “${key}” go to ${cat}. Existing ones keep their category.`);
     }, `Always for “${key}”`);
   }
 });
@@ -1330,7 +1371,42 @@ $("#reg").addEventListener("click", e => {
 $("#regAcct").onchange = e => { S.regAcct = e.target.value; S.showN=150; renderAll(); };
 $("#catFilter").onchange = e => { S.catFilter = e.target.value; S.showN=150; renderAll(); };
 $("#period").onchange = e => { S.period = e.target.value; S.showN=150; renderAll(); };
+function openMonthPick(){
+  const months = monthsOf(TX).slice().reverse(), chosen = new Set(S.period === "multi" ? S.months : S.period.length === 7 ? [S.period] : []);
+  const years = [...new Set(months.map(m => m.slice(0,4)))].reverse();
+  $("#monthPick").innerHTML = months.length ? `<div class="scroll">${years.map(y => `<h4>${y}</h4><div class="mgrid">${months.filter(m => m.startsWith(y)).map(m =>
+      `<label><input type="checkbox" value="${m}" ${chosen.has(m)?"checked":""}>${MON_T[+m.slice(5)-1].slice(0,3)}</label>`).join("")}</div>`).join("")}</div>
+    <div class="row" style="justify-content:space-between"><button class="btn small ghost" type="button" data-mp="clear">Clear</button><span class="row"><button class="btn small" type="button" data-mp="cancel">Cancel</button><button class="btn small primary" type="button" data-mp="apply">Show these months</button></span></div>`
+    : `<span class="muted" style="font-size:.85rem">Import a statement first.</span>`;
+  $("#monthPick").hidden = false; $("#monthsBtn").setAttribute("aria-expanded", "true");
+}
+function closeMonthPick(){ $("#monthPick").hidden = true; $("#monthsBtn").setAttribute("aria-expanded", "false"); }
+$("#monthsBtn").onclick = () => $("#monthPick").hidden ? openMonthPick() : closeMonthPick();
+$("#monthPick").addEventListener("click", e => {
+  const a = e.target.closest("[data-mp]")?.dataset.mp; if(!a) return;
+  if(a === "clear"){ $("#monthPick").querySelectorAll("input").forEach(i => i.checked = false); return; }
+  if(a === "apply"){
+    const picked = [...$("#monthPick").querySelectorAll("input:checked")].map(i => i.value).sort();
+    if(!picked.length){ toast("Pick at least one month."); return; }
+    if(picked.length === 1){ S.period = picked[0]; S.months = []; } else { S.period = "multi"; S.months = picked; }
+    S.showN = 150; renderAll();
+  }
+  closeMonthPick();
+});
+document.addEventListener("click", e => { if(!$("#monthPick").hidden && !e.target.closest(".month-wrap")) closeMonthPick(); });
+document.addEventListener("keydown", e => { if(e.key === "Escape" && !$("#monthPick").hidden){ closeMonthPick(); $("#monthsBtn").focus(); } });
 $("#acctFilter").onchange = e => { S.account = e.target.value; renderAll(); };
+/* scan every statement, not just the period and card in view */
+$("#repCheck").onclick = () => {
+  const n = TX.filter(t => t.rep).length;
+  if(!n){ toast("No charges repeated within 3 days across all your statements."); return; }
+  S.period = "all"; S.account = "all"; S.regAcct = "all"; S.catFilter = "__repeat"; S.showN = 150;
+  S.search = ""; $("#search").value = "";
+  S.dateFrom = S.dateTo = ""; $("#dateFrom").value = $("#dateTo").value = "";
+  S.amtMin = S.amtMax = null; $("#amtMin").value = $("#amtMax").value = "";
+  renderAll(); $("#register").scrollIntoView({block:"start"});
+  toast(`${n} ${n===1?"charge is":"charges are"} repeated within 3 days. Showing them from all your statements.`);
+};
 $("#dateFrom").onchange = e => { S.dateFrom = e.target.value; S.showN=150; renderAll(); };
 $("#dateTo").onchange = e => { S.dateTo = e.target.value; S.showN=150; renderAll(); };
 let aT; const amtVal = v => v.trim()==="" || isNaN(+v) ? null : Math.abs(+v);
@@ -1470,7 +1546,7 @@ function renderInvest(periodTx){
   const value = rows.reduce((s,r)=>s+(r.last?r.last.v:0),0);
   const putAll = allInv.reduce((s,t)=>s+t.a,0), putPer = perInv.reduce((s,t)=>s+t.a,0);
   renderInvNeed(allInv.filter(t => !t.ia && t.imp !== "example" && t.imp !== "house"), accts);
-  const pl = S.period==="all" ? "all time" : S.period==="l12" ? "last 12 months" : monthLabel(S.period);
+  const pl = S.period==="all" ? "all time" : S.period==="l12" ? "last 12 months" : periodName();
   $("#invSum").innerHTML = `
     <div><span class="label">Total value</span><span class="big">${money(value)}</span><span class="delta">latest value you saved for each</span></div>
     <div><span class="label">Put in · ${esc(pl)}</span><span class="big">${money(putPer)}</span><span class="delta">from your statements</span></div>
@@ -2043,7 +2119,7 @@ function importStage(st){
   for(let i=0;i<fresh.length;i+=1200){
     const part = fresh.slice(i,i+1200);
     const id = "imp_" + Date.now().toString(36) + rid().slice(0,4);
-    putDoc(id, {kind:"import", name: st.name + (fresh.length>1200?` (part ${i/1200+1})`:""), account, createdAt:new Date().toISOString(), txns: part.map(({id,d,s,a})=>({id,d,s,a}))});
+    putDoc(id, {kind:"import", name: st.name + (fresh.length>1200?` (part ${i/1200+1})`:""), account, createdAt:new Date().toISOString(), txns: part.map(({id,d,s,a})=>withAutoCat({id,d,s,a}))});
   }
   const saved = S.docs.settings && S.docs.settings.cards;
   if(Array.isArray(saved) && !saved.includes(account)) saveSettings({cards: saved.concat(account)});
