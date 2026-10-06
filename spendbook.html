@@ -190,6 +190,12 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 .quick button.rep{border-color:var(--danger);color:var(--danger)}
 .quick button.rep.on{background:var(--danger);color:var(--surface);border-style:solid}
 .repnote{color:var(--danger)}
+.repnote.done{color:var(--muted)}
+.rep-group{border:2px solid var(--danger);border-radius:8px;margin:8px 0;padding:0 6px}
+.rep-group.done{border-color:var(--line)}
+.rep-group .rep-head{font-size:.8rem;font-weight:600;color:var(--danger);padding:6px 4px 0}
+.rep-group.done .rep-head{color:var(--muted)}
+.rep-group .reg-row:last-child{border-bottom:0}
 #regCount .tot b{color:var(--fg);font-weight:600} #regCount .tot.cr b{color:var(--credit)}
 .empty{color:var(--muted);font-size:.92rem;padding:10px 0}
 /* trend */
@@ -366,7 +372,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <select id="regAcct" aria-label="Card or account filter"></select>
       <span class="range"><label for="dateFrom">From</label><input type="date" id="dateFrom"><label for="dateTo">to</label><input type="date" id="dateTo"></span>
       <span class="range"><label for="amtMin">Amount $</label><input type="number" id="amtMin" min="0" step="0.01" placeholder="min" inputmode="decimal"><label for="amtMax">to</label><input type="number" id="amtMax" min="0" step="0.01" placeholder="max" inputmode="decimal"></span>
-      <button class="btn small" id="repCheck" type="button" title="Look for the same charge twice within 3 days in all your statements">Check for repeats</button>
+      <button class="btn small" id="repCheck" type="button" title="Look for the same charge twice within 5 days in all your statements">Check for repeats</button>
       <select id="regSort" aria-label="Sort transactions"><option value="date-desc">Newest first</option><option value="date-asc">Oldest first</option><option value="amt-desc">Largest amount first</option><option value="amt-asc">Smallest amount first</option></select>
       <span id="chips" class="row"></span>
     </div>
@@ -954,28 +960,48 @@ function bestHouseMatch(t, payments){
   }
   return best;
 }
-/* same merchant, same amount, charged again within 3 days (any card) */
+/* same merchant, same amount, charged again within 5 days (any card, any category).
+   Charges chained within 5 of each other form one group; pairs you marked "not a duplicate"
+   stay in the group but no longer count as unreviewed. */
+const REPEAT_DAYS = 5;
 const repKey = t => t.imp + "|" + t.id;
 const pairKey = (a, b) => [repKey(a), repKey(b)].sort().join("~");
 function flagRepeats(list){
   const ok = new Set(settings().notDup || []);
   const groups = {};
   for(const t of list){
-    if(t.imp === "house" || t.imp === "example" || t.a <= 0 || CAT_KIND[t.cat] === "transfer") continue;
+    if(t.imp === "house" || t.imp === "example" || t.a <= 0) continue;
     /* first word of the merchant only: banks add store numbers and cities differently */
     const k = Math.round(t.a*100) + "|" + merchantKey(t.s).split(" ")[0];
     (groups[k] = groups[k] || []).push(t);
   }
-  for(const g of Object.values(groups)){
+  for(const [k, g] of Object.entries(groups)){
     if(g.length < 2) continue;
     g.sort((a,b) => a.d.localeCompare(b.d));
-    for(let i=0;i<g.length;i++) for(let j=i+1;j<g.length;j++){
-      if(dayNum(g[j].d) - dayNum(g[i].d) > 3) break;
-      const pk = pairKey(g[i], g[j]); if(ok.has(pk)) continue;
-      (g[i].rep = g[i].rep || []).push({pk, other:g[j]});
-      (g[j].rep = g[j].rep || []).push({pk, other:g[i]});
+    let gid = null;
+    for(let i=0;i<g.length;i++){
+      if(i === 0 || dayNum(g[i].d) - dayNum(g[i-1].d) > REPEAT_DAYS) gid = k + "|" + g[i].d;
+      g[i].repGroup = gid;
+      for(let j=i+1;j<g.length;j++){
+        if(dayNum(g[j].d) - dayNum(g[i].d) > REPEAT_DAYS) break;
+        const pk = pairKey(g[i], g[j]), reviewed = ok.has(pk);
+        (g[i].rep = g[i].rep || []).push({pk, other:g[j], reviewed});
+        (g[j].rep = g[j].rep || []).push({pk, other:g[i], reviewed});
+      }
     }
+    for(const t of g){ if(!t.rep) delete t.repGroup; else t.repOpen = t.rep.some(r => !r.reviewed); }
   }
+}
+/* repeats view: each set of same-amount charges together, oldest first, inside one border; newest sets first */
+function repeatGroupsHtml(rows, rowHtml){
+  const by = new Map();
+  for(const t of rows){ if(!t.repGroup) continue; if(!by.has(t.repGroup)) by.set(t.repGroup, []); by.get(t.repGroup).push(t); }
+  const sets = [...by.values()].map(g => g.sort((a,b) => a.d.localeCompare(b.d)))
+    .sort((a,b) => b[b.length-1].d.localeCompare(a[a.length-1].d));
+  return sets.map(g => {
+    const span = dayNum(g[g.length-1].d) - dayNum(g[0].d), open = g.some(t => t.repOpen);
+    return `<div class="rep-group ${open?"":"done"}"><div class="rep-head">${money(g[0].a,true)} · ${g.length} charges${span ? ` over ${span+1} days` : " on the same day"}${open ? "" : " · reviewed"}</div>${g.map(rowHtml).join("")}</div>`;
+  }).join("");
 }
 function allTxns(){
   const hr = houseRows();
@@ -1161,7 +1187,7 @@ function renderMerchants(list){
 const drcr = a => a < 0 ? `<span class="drcr cr" title="Credit: money in">Cr</span>` : `<span class="drcr db" title="Debit: money out">Db</span>`;
 const catOptions = sel => CAT_NAMES.map(c => `<option ${c===sel?"selected":""}>${esc(c)}</option>`).join("");
 function renderRegister(list){
-  $("#catFilter").innerHTML = `<option value="">All categories</option><option value="__review">Not recognised (in Misc.)</option><option value="__househint">Check against house sheet</option><option value="__repeat">Repeated within 3 days</option>` + CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
+  $("#catFilter").innerHTML = `<option value="">All categories</option><option value="__review">Not recognised (in Misc.)</option><option value="__househint">Check against house sheet</option><option value="__repeat">Repeated within 5 days</option>` + CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
   $("#catFilter").value = S.catFilter;
   const racc = [...new Set(list.map(t=>t.acct))].sort();
   if(S.regAcct !== "all" && !racc.includes(S.regAcct)) S.regAcct = "all";
@@ -1184,7 +1210,7 @@ function renderRegister(list){
   const sum = rows.reduce((s,t)=>s+t.a,0);
   const debits = rows.reduce((s,t)=>s+(t.a>0?t.a:0),0), credits = rows.reduce((s,t)=>s+(t.a<0?-t.a:0),0);
   $("#regCount").innerHTML = `${rows.length} ${rows.length===1?"entry":"entries"} · <span class="tot">Debits <b>${money(debits,true)}</b></span> · <span class="tot cr">Credits <b>${money(credits,true)}</b></span> · net ${money(sum,true)}`;
-  $("#chips").innerHTML = (S.catFilter ? `<span class="chip">${esc(S.catFilter==="__review"?"Not recognised":S.catFilter==="__househint"?"Check against house sheet":S.catFilter==="__repeat"?"Repeated within 3 days":S.catFilter)}<button data-clear="cat" aria-label="Clear category filter">×</button></span>` : "")
+  $("#chips").innerHTML = (S.catFilter ? `<span class="chip">${esc(S.catFilter==="__review"?"Not recognised":S.catFilter==="__househint"?"Check against house sheet":S.catFilter==="__repeat"?"Repeated within 5 days":S.catFilter)}<button data-clear="cat" aria-label="Clear category filter">×</button></span>` : "")
     + (S.regAcct!=="all" ? `<span class="chip">${esc(S.regAcct)}<button data-clear="acct" aria-label="Clear card filter">×</button></span>` : "")
     + (S.dateFrom || S.dateTo ? `<span class="chip">${S.dateFrom ? shortDate(S.dateFrom) : "Start"} – ${S.dateTo ? shortDate(S.dateTo) : "today"} (instead of the period above)<button data-clear="dates" aria-label="Clear date range">×</button></span>` : "")
     + (S.amtMin !== null || S.amtMax !== null ? `<span class="chip">${S.amtMin !== null && S.amtMax !== null ? `${money(S.amtMin,true)} – ${money(S.amtMax,true)}` : S.amtMin !== null ? `${money(S.amtMin,true)} and above` : `${money(S.amtMax,true)} and below`}<button data-clear="amt" aria-label="Clear amount filter">×</button></span>` : "");
@@ -1192,25 +1218,28 @@ function renderRegister(list){
   const ex = isExample();
   const ro = t => ex || t.imp === "house";
   const arrow = k => sk === k ? (sd === "asc" ? "▲" : "▼") : "";
-  const nUnrec = base.filter(t => isUnsorted(t) && !ro(t)).length, nHint = base.filter(t=>t.hint).length, nIn = base.filter(t=>t.cat==="In house sheet").length, nRep = base.filter(t=>t.rep).length;
-  $("#quick").innerHTML = (nRep ? `<button type="button" class="rep ${S.catFilter==="__repeat"?"on":""}" data-quick="__repeat">Repeated within 3 days · ${nRep}</button>` : "") + (nUnrec ? `<button type="button" data-quick="__review" class="${S.catFilter==="__review"?"on":""}">Not recognised · ${nUnrec}</button>` : "")
+  const nUnrec = base.filter(t => isUnsorted(t) && !ro(t)).length, nHint = base.filter(t=>t.hint).length, nIn = base.filter(t=>t.cat==="In house sheet").length, nRep = base.filter(t=>t.repOpen).length;
+  $("#quick").innerHTML = (nRep ? `<button type="button" class="rep ${S.catFilter==="__repeat"?"on":""}" data-quick="__repeat">Repeated within 5 days · ${nRep}</button>` : "") + (nUnrec ? `<button type="button" data-quick="__review" class="${S.catFilter==="__review"?"on":""}">Not recognised · ${nUnrec}</button>` : "")
     + (nHint ? `<button type="button" class="house ${S.catFilter==="__househint"?"on":""}" data-quick="__househint">Check against house sheet · ${nHint}</button>` : "")
     + (nIn ? `<button type="button" class="house ${S.catFilter==="In house sheet"?"on":""}" data-quick="In house sheet">Left out: in house sheet · ${nIn}</button>` : "");
   const keyOf = t => t.imp + "|" + t.id;
   S.shownKeys = shown.filter(t=>!ro(t)).map(keyOf);
   const allOn = S.shownKeys.length && S.shownKeys.every(k=>S.sel.has(k));
   const unrec = rows.filter(t => isUnsorted(t) && !ro(t)).length;
-  $("#reg").innerHTML = (unrec ? `<p class="inc-note" style="margin:0 0 6px">${unrec} ${unrec===1?"transaction has":"transactions have"} a dashed orange category: Spendbook didn’t recognise the merchant and put ${unrec===1?"it":"them"} in Misc. Pick the right category, or use “Ask Claude to sort unrecognised” in Settings.</p>` : "")
-    + `<div class="reg-row head"><span><input type="checkbox" id="selAll" aria-label="Select all shown" ${allOn?"checked":""} ${S.shownKeys.length?"":"disabled"}></span><span><button type="button" data-sort="date" class="${sk==="date"?"on":""}" aria-label="Sort by date">Date ${arrow("date")}</button></span><span>Description</span><span>Category</span><span style="text-align:right"><button type="button" data-sort="amt" class="${sk==="amt"?"on":""}" aria-label="Sort by amount">Amount ${arrow("amt")}</button></span><span></span></div>` +
-    (shown.length ? shown.map(t => `
+  const rowHtml = t => `
     <div class="reg-row ${S.sel.has(keyOf(t))?"picked":""}" data-id="${esc(t.id)}" data-imp="${esc(t.imp)}">
       <span class="cb"><input type="checkbox" class="rsel" aria-label="Select" ${S.sel.has(keyOf(t))?"checked":""} ${ro(t)?"disabled":""}></span>
       <span class="d">${shortDate(t.d)}</span>
-      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.cat==="Investments" && !ro(t) ? ` · <span style="color:var(--c-inv)">${t.ia ? `Account: ${esc(t.ia)}` : "Account not set (see Investments)"}</span>${t.ia ? ` <button type="button" class="linkbtn" data-ia-clear>Change</button>` : ""}` : ""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote" title="${esc(r.other.s)}">same charge on ${shortDate(r.other.d)} (${esc(r.other.acct)})</span> <button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`).join(""):""}</small></span>
+      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.cat==="Investments" && !ro(t) ? ` · <span style="color:var(--c-inv)">${t.ia ? `Account: ${esc(t.ia)}` : "Account not set (see Investments)"}</span>${t.ia ? ` <button type="button" class="linkbtn" data-ia-clear>Change</button>` : ""}` : ""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote ${r.reviewed?"done":""}" title="${esc(r.other.s)}">same charge on ${shortDate(r.other.d)} (${esc(r.other.acct)})${r.reviewed?", marked not a duplicate":""}</span> ${r.reviewed ? `<button type="button" class="linkbtn" data-redup="${esc(r.pk)}">Undo</button>` : `<button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`}`).join(""):""}</small></span>
       <span class="catc"><select aria-label="Category" class="${isUnsorted(t)&&!ro(t)?"other":""}" ${isUnsorted(t)&&!ro(t)?'title="Not recognised: pick the right category"':""} ${ro(t)?"disabled title=\"Edit this in the Google Sheet\"":""}>${catOptions(t.cat)}</select></span>
       <span class="a ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)}${drcr(t.a)}</span>
       <button class="x" aria-label="Delete this transaction" ${ro(t)?"disabled":""}>×</button>
-    </div>`).join("") : `<p class="empty">No transactions match.</p>`);
+    </div>`;
+  $("#reg").innerHTML = (unrec ? `<p class="inc-note" style="margin:0 0 6px">${unrec} ${unrec===1?"transaction has":"transactions have"} a dashed orange category: Spendbook didn’t recognise the merchant and put ${unrec===1?"it":"them"} in Misc. Pick the right category, or use “Ask Claude to sort unrecognised” in Settings.</p>` : "")
+    + `<div class="reg-row head"><span><input type="checkbox" id="selAll" aria-label="Select all shown" ${allOn?"checked":""} ${S.shownKeys.length?"":"disabled"}></span><span><button type="button" data-sort="date" class="${sk==="date"?"on":""}" aria-label="Sort by date">Date ${arrow("date")}</button></span><span>Description</span><span>Category</span><span style="text-align:right"><button type="button" data-sort="amt" class="${sk==="amt"?"on":""}" aria-label="Sort by amount">Amount ${arrow("amt")}</button></span><span></span></div>` +
+    (!shown.length ? `<p class="empty">No transactions match.</p>`
+      : S.catFilter === "__repeat" ? repeatGroupsHtml(rows, rowHtml)
+      : shown.map(rowHtml).join(""));
   renderBulk();
   $("#moreBtn").hidden = rows.length <= S.showN;
   $("#regFoot").textContent = rows.length > S.showN ? `Showing ${S.showN} of ${rows.length}` : "";
@@ -1361,6 +1390,8 @@ $("#reg").addEventListener("click", e => {
     toast(same ? `Left out: ${money(t.a,true)} is already in the house sheet.` : `Kept as ${t.c}.`, () => putDoc(row.dataset.imp, before), "Undo");
     return;
   }
+  const rd = e.target.closest("[data-redup]");
+  if(rd){ const pk = rd.dataset.redup; saveSettings({notDup:(settings().notDup||[]).filter(x=>x!==pk)}); return; }
   const nd = e.target.closest("[data-notdup]");
   if(nd){ const pk = nd.dataset.notdup; saveSettings({notDup:(settings().notDup||[]).concat(pk)}); toast("Marked as not a duplicate.", () => saveSettings({notDup:(settings().notDup||[]).filter(x=>x!==pk)}), "Undo"); }
 });
@@ -1398,14 +1429,14 @@ document.addEventListener("keydown", e => { if(e.key === "Escape" && !$("#monthP
 $("#acctFilter").onchange = e => { S.account = e.target.value; renderAll(); };
 /* scan every statement, not just the period and card in view */
 $("#repCheck").onclick = () => {
-  const n = TX.filter(t => t.rep).length;
-  if(!n){ toast("No charges repeated within 3 days across all your statements."); return; }
+  const n = TX.filter(t => t.rep).length, open = TX.filter(t => t.repOpen).length, groupsN = new Set(TX.filter(t => t.rep).map(t => t.repGroup)).size;
+  if(!n){ toast("No charges repeated within 5 days across all your statements."); return; }
   S.period = "all"; S.account = "all"; S.regAcct = "all"; S.catFilter = "__repeat"; S.showN = 150;
   S.search = ""; $("#search").value = "";
   S.dateFrom = S.dateTo = ""; $("#dateFrom").value = $("#dateTo").value = "";
   S.amtMin = S.amtMax = null; $("#amtMin").value = $("#amtMax").value = "";
   renderAll(); $("#register").scrollIntoView({block:"start"});
-  toast(`${n} ${n===1?"charge is":"charges are"} repeated within 3 days. Showing them from all your statements.`);
+  toast(`${groupsN} ${groupsN===1?"set":"sets"} of repeated charges (${n} charges, ${open} not yet reviewed), shown together from all your statements.`);
 };
 $("#dateFrom").onchange = e => { S.dateFrom = e.target.value; S.showN=150; renderAll(); };
 $("#dateTo").onchange = e => { S.dateTo = e.target.value; S.showN=150; renderAll(); };

@@ -8,7 +8,7 @@ A personal spend tracker in a single HTML file. Upload bank and credit card stat
 - **Card picker**: each statement is tagged with the card or account it came from.
 - **Categories**: House, Car, Groceries, Gas + Costco, Travel, Dining Out + Entertainment, Utilities and Misc., plus Income, Investments, Transfers and In house sheet, which are kept out of spend. Unrecognised merchants are flagged for review. Settings explains what each category means and lists every keyword.
 - **Rules and bulk editing**: change one transaction or many at once, and optionally remember the choice for that merchant.
-- **Repeated charges**: the same amount at the same merchant within 3 days, on any card, is flagged so you can check for double charges.
+- **Repeated charges**: the same amount at the same merchant within 5 days, on any card and in any category, is flagged and shown side by side so you can check for double charges.
 - **House cost sheet**: reads a "House cost" tab from a Google Sheet. Card charges that may already be in the sheet are shown next to the matching sheet row, and you decide whether each one is the same payment before it's left out.
 - **Dashboards**: overall spend by category, a monthly chart with toggles for each category and an income line, spend by card, top merchants, and the 3 biggest costs in each category.
 - **Recurring charges**: detects subscriptions and bills, and flags price rises and charges that stopped.
