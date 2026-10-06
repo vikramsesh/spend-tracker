@@ -18,11 +18,16 @@ service cloud.firestore {
       allow read, write: if isMember();
     }
 
-    // Change history: anyone in the book can add an entry under their own email;
-    // nobody can edit or delete past entries.
+    // Change history: anyone in the book can add an entry under their own email,
+    // stamped with the server's time; nobody can edit or delete past entries.
     match /books/shared/log/{id} {
       allow read: if isMember();
-      allow create: if isMember() && request.resource.data.email == request.auth.token.email;
+      allow create: if isMember()
+        && request.resource.data.keys().hasOnly(['at', 'email', 'text'])
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.at == request.time
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 1000;
       allow update, delete: if false;
     }
   }

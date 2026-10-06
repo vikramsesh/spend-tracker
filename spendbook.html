@@ -4,12 +4,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js" integrity="sha384-SnzOobpRMLXZ52iJvZm/C0fYw0OQemTXzTjIsdsfMcrCtCEe9qgzxTd3RSklO5x2" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js" integrity="sha384-ZaR6mWzmJtrRibZ1Vm7SoHFr8OXjyAuGAXalGDKqbxFT18oi/z+oZLIRFkpeNor1" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js" integrity="sha384-I1LYojsZ5RM1cOda44Z2h42Qa6YfsQ1XkXxREnhp4ueYBR/4d1pG1K+NZM537Vsj" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js" integrity="sha384-Ke0FJhH7LyRqDxZ0wt+/OXV38yfQVu7g9VPEEGjYmB4RVOY/ta04uecRhsMwT7V3" crossorigin="anonymous"></script>
 <style>
 /* Layout: ledger strip of totals up top, two-column analysis (categories | trend + merchants), full-width register of entries below. */
 :root{
@@ -30,6 +30,24 @@
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--f-body);margin:0}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+.layout{display:grid;grid-template-columns:200px minmax(0,1fr);max-width:1440px;margin:0 auto}
+.sidenav{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:24px 8px 24px 20px;display:flex;flex-direction:column;gap:2px;box-sizing:border-box}
+.sidenav .nav-title{font-family:var(--f-display);font-weight:700;font-size:1.05rem;padding:4px 10px 12px}
+.sidenav a{color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;font-size:.88rem;border-left:3px solid transparent}
+.sidenav a:hover{color:var(--fg);background:var(--sunk)}
+.sidenav a.on{color:var(--fg);background:var(--sunk);border-left-color:var(--accent);font-weight:600}
+.sidenav a[hidden]{display:none}
+section[id],.strip{scroll-margin-top:16px}
+@media (max-width:1000px){
+  .layout{display:block}
+  .sidenav{position:sticky;top:0;z-index:12;height:auto;flex-direction:row;overflow-x:auto;padding:8px 16px;background:var(--bg);border-bottom:1px solid var(--line);white-space:nowrap}
+  .sidenav .nav-title{display:none}
+  .sidenav a{border-left:0;border-bottom:3px solid transparent;border-radius:6px 6px 0 0}
+  .sidenav a.on{border-bottom-color:var(--accent)}
+  section[id],.strip{scroll-margin-top:60px}
+}
 .wrap{max-width:1200px;margin:0 auto;padding-inline:20px;padding-block:20px 60px;display:flex;flex-direction:column;gap:22px}
 h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;font-weight:700}
 h1{font-size:1.75rem;letter-spacing:-.01em}
@@ -288,6 +306,21 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
 </style>
 
+<div class="layout">
+<nav class="sidenav" id="sidenav" aria-label="Sections">
+  <span class="nav-title">Spendbook</span>
+  <a href="#kpis">Totals</a>
+  <a href="#catPanel">Overall spend</a>
+  <a href="#trendPanel">Monthly spend</a>
+  <a href="#merchPanel">Top merchants</a>
+  <a href="#topsPanel">Biggest costs</a>
+  <a href="#recPanel">Recurring charges</a>
+  <a href="#invPanel">Investments</a>
+  <a href="#register">Transactions</a>
+  <a href="#importsPanel">Statements &amp; accounts</a>
+  <a href="#settingsPanel">Settings</a>
+  <a href="#historyPanel">Change history</a>
+</nav>
 <div class="wrap">
   <header class="top">
     <div class="brand">
@@ -313,7 +346,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
   <section class="strip" id="kpis" aria-label="Totals"></section>
 
   <div class="grid2">
-    <section class="panel">
+    <section class="panel" id="catPanel">
       <div class="panel-head"><h2>Overall spend</h2><span class="muted" id="catNote" style="font-size:.85rem"></span></div>
       <div id="overall" class="stack" style="gap:12px"></div>
       <div class="cats" id="cats"></div>
@@ -321,20 +354,20 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <div class="field"><span class="label">Where it was paid from</span><div class="srcs" id="srcs"></div></div>
     </section>
     <div class="stack">
-      <section class="panel trend">
+      <section class="panel trend" id="trendPanel">
         <div class="panel-head"><h2>Monthly spend and income</h2><span class="muted" id="trendNote" style="font-size:.85rem">last 12 months</span></div>
         <span class="inc-note" style="margin-top:-8px">Click a category below to show or hide it.</span>
         <div id="trend"></div>
         <div class="legend" id="legend"></div>
       </section>
-      <section class="panel">
+      <section class="panel" id="merchPanel">
         <div class="panel-head"><h2>Top merchants</h2></div>
         <div class="merch" id="merch"></div>
       </section>
     </div>
   </div>
 
-  <section class="panel">
+  <section class="panel" id="topsPanel">
     <div class="panel-head"><h2>Biggest costs in each category</h2><span class="muted" id="topNote" style="font-size:.85rem"></span></div>
     <div class="tops" id="tops"></div>
   </section>
@@ -390,11 +423,11 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
   </section>
 
   <div class="grid2">
-    <section class="panel">
+    <section class="panel" id="importsPanel">
       <div class="panel-head"><h2>Statements &amp; accounts</h2></div>
       <div class="imports" id="imports"></div>
     </section>
-    <section class="panel">
+    <section class="panel" id="settingsPanel">
       <div class="panel-head"><h2>Settings</h2></div>
       <div class="settings-grid">
         <label class="field"><span>Currency</span><select id="currency"></select></label>
@@ -461,6 +494,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
     <div class="panel-head"><h2>Change history</h2><select id="histWho" aria-label="Show changes made by"></select></div>
     <div class="hist-log" id="histLog"></div>
   </section>
+</div>
 </div>
 
 <div class="overlay" id="importer" hidden>
@@ -539,8 +573,9 @@ function guessCard(name){
 /* the house cost sheet is set in Settings; until then, the sheet last read into the book */
 function houseSheet(){
   const st = S.docs.settings && S.docs.settings.houseSheet;
-  if(st && st.id) return {id: st.id, tab: st.tab || "House cost"};
-  if(S.house && S.house.sheetId) return {id: S.house.sheetId, tab: S.house.tab || "House cost"};
+  const pick = (id, tab, by) => { id = sheetIdFrom(id); return id ? {id, tab: typeof tab === "string" && tab.trim() ? tab.trim().slice(0,100) : "House cost", by: typeof by === "string" ? by : ""} : null; };
+  if(st && st.id) return pick(st.id, st.tab, st.by);
+  if(S.house && S.house.sheetId) return pick(S.house.sheetId, S.house.tab, "");
   return null;
 }
 const sheetIdFrom = v => { v = String(v||"").trim(); const m = v.match(/\/d\/([A-Za-z0-9_-]+)/); const id = m ? m[1] : v; return /^[A-Za-z0-9_-]{20,}$/.test(id) ? id : null; };
@@ -549,7 +584,7 @@ function saveHidden(){ try{ localStorage.setItem("spendbook-hidden", JSON.string
 const S = {
   house:null, houseDb:null, mcp:null, houseBusy:false,
   docs:{}, loaded:false, mode:"memory", fbUser:null, localCopy:null, logCol:null, log:[], histWho:"all", histN:100,
-  period:null, months:[], account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), catFilter:"", search:"", dateFrom:"", dateTo:"", amtMin:null, amtMax:null, showN:150,
+  period:null, months:[], account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), showReviewed:false, catFilter:"", search:"", dateFrom:"", dateTo:"", amtMin:null, amtMax:null, showN:150,
   stages:[], sample:null, downloads:null, imgLimits:null,
 };
 const settings = () => Object.assign({currency:guessCurrency(), dateOrder:"auto", rules:[]}, S.docs.settings||{});
@@ -793,11 +828,11 @@ function describeChanges(changes){
 }
 function logChange(text){
   if(!S.logCol || !S.fbUser) return;
-  S.logCol.add({at: new Date().toISOString(), email: S.fbUser.email, name: S.fbUser.displayName || "", text: String(text).slice(0, 1000)})
+  S.logCol.add({at: firebase.firestore.FieldValue.serverTimestamp(), email: S.fbUser.email, text: String(text).slice(0, 1000)})
     .catch(() => toast("Couldn’t record this change in the history."));
 }
 function renderHistory(){
-  const panel = $("#historyPanel"); panel.hidden = !S.logCol;
+  const panel = $("#historyPanel"); panel.hidden = !S.logCol; updateNav();
   if(!S.logCol) return;
   const who = [...new Set(S.log.map(e => e.email))].sort();
   if(S.histWho !== "all" && !who.includes(S.histWho)) S.histWho = "all";
@@ -805,7 +840,7 @@ function renderHistory(){
   $("#histWho").value = S.histWho;
   const list = S.log.filter(e => S.histWho === "all" || e.email === S.histWho);
   $("#histLog").innerHTML = list.length
-    ? list.slice(0, S.histN).map(e => `<div class="h-row"><span class="h-when">${esc(new Date(e.at).toLocaleString([], {dateStyle:"medium", timeStyle:"short"}))}</span><span class="h-who" title="${esc(e.email)}">${esc(e.name || e.email)}</span><span>${esc(e.text)}</span></div>`).join("")
+    ? list.slice(0, S.histN).map(e => `<div class="h-row"><span class="h-when">${esc(isNaN(e.when) ? "" : e.when.toLocaleString([], {dateStyle:"medium", timeStyle:"short"}))}</span><span class="h-who" title="${esc(e.email)}">${esc(e.email)}</span><span>${esc(e.text)}</span></div>`).join("")
       + (list.length > S.histN ? `<button class="btn small" id="histMore" type="button" style="margin-top:8px;align-self:flex-start">Show more</button>` : "")
     : `<p class="empty">No changes recorded yet.</p>`;
 }
@@ -846,7 +881,13 @@ function initFirebase(){
     if(!u){ S.logCol = null; S.log = []; renderHistory(); col = null; S.houseDb = null; S.docs = {}; S.mode = "signin"; S.loaded = true; setBadge(); renderAll(); return; }
     col = fs.collection(BOOK + "/docs");
     S.logCol = fs.collection(BOOK + "/log");
-    unsubs.push(S.logCol.orderBy("at", "desc").limit(500).onSnapshot(snap => { S.log = snap.docs.map(d => d.data()); renderHistory(); }, () => {}));
+    /* "at" is the server's time; entries written before that change stored a client ISO string */
+    const whenOf = v => v && typeof v.toDate === "function" ? v.toDate() : new Date(typeof v === "string" ? v : 0);
+    unsubs.push(S.logCol.orderBy("at", "desc").limit(500).onSnapshot(snap => {
+      S.log = snap.docs.map(d => d.data({serverTimestamps:"estimate"})).filter(e => e && typeof e.email === "string" && typeof e.text === "string")
+        .map(e => ({email: e.email, text: e.text, when: whenOf(e.at)})).sort((a,b) => b.when - a.when);
+      renderHistory();
+    }, () => {}));
     S.houseDb = fs.doc(BOOK + "/meta/house");
     S.mode = "cloud"; S.loaded = false; setBadge();
     const denied = err => toast(err && err.code === "permission-denied"
@@ -936,7 +977,11 @@ function exampleDocs(){
   return [{id:"example", kind:"import", name:"Example data", account:"Example Bank", txns:out}];
 }
 const importDocs = () => Object.entries(S.docs).filter(([k,v]) => v && v.kind === "import").map(([k,v]) => ({...v, id:k}));
-const houseRows = () => (S.house && Array.isArray(S.house.rows)) ? S.house.rows : [];
+/* data written to the shared book is checked on the way in: dates must be YYYY-MM-DD and amounts numbers,
+   so nothing stored outside the app can reach the page as markup */
+const isYmd = d => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+const validTxn = t => t && isYmd(t.d) && typeof t.a === "number" && isFinite(t.a) && typeof t.s === "string";
+const houseRows = () => (S.house && Array.isArray(S.house.rows)) ? S.house.rows.filter(validTxn) : [];
 const isExample = () => !houseRows().length && importDocs().every(d => !(d.txns||[]).length);
 /* every amount a single bank debit could be for: each sheet row, and each run of rows sharing a date (principal + interest + escrow + PMI) */
 function housePayments(hr){
@@ -992,12 +1037,14 @@ function flagRepeats(list){
   }
 }
 /* repeats view: each set of same-amount charges together, oldest first, inside one border; newest sets first */
-function repeatGroupsHtml(rows, rowHtml){
+function repeatGroupsHtml(rows, rowHtml, reviewedN){
+  const bar = reviewedN ? `<p class="inc-note" style="margin:4px 0">${S.showReviewed ? `Showing ${reviewedN} reviewed ${reviewedN===1?"transaction":"transactions"} (grey). <button type="button" class="linkbtn" data-reviewed="hide">Hide reviewed</button>` : `${reviewedN} reviewed ${reviewedN===1?"transaction is":"transactions are"} hidden. <button type="button" class="linkbtn" data-reviewed="show">Show reviewed</button>`}</p>` : "";
   const by = new Map();
   for(const t of rows){ if(!t.repGroup) continue; if(!by.has(t.repGroup)) by.set(t.repGroup, []); by.get(t.repGroup).push(t); }
   const sets = [...by.values()].map(g => g.sort((a,b) => a.d.localeCompare(b.d)))
     .sort((a,b) => b[b.length-1].d.localeCompare(a[a.length-1].d));
-  return sets.map(g => {
+  if(!sets.length) return bar + `<p class="empty">Nothing left to review.</p>`;
+  return bar + sets.map(g => {
     const span = dayNum(g[g.length-1].d) - dayNum(g[0].d), open = g.some(t => t.repOpen);
     return `<div class="rep-group ${open?"":"done"}"><div class="rep-head">${money(Math.abs(g[0].a),true)} · ${g.length} transactions${span ? ` over ${span+1} days` : " on the same day"}${open ? "" : " · reviewed"}</div>${g.map(rowHtml).join("")}</div>`;
   }).join("");
@@ -1008,6 +1055,7 @@ function allTxns(){
   const payments = hr.length ? housePayments(hr) : [];
   const out = [];
   for(const doc of docs) for(const t of (doc.txns||[])){
+    if(!validTxn(t)) continue;
     let cat = doc.id === "house" ? "House" : effCat(t);
     /* a card charge that may already be in the house sheet: counted until you confirm it either way */
     let hm = null;
@@ -1050,6 +1098,7 @@ function renderAll(){
   if(!S.loaded && !Object.keys(S.docs).length){ /* keep example view while connecting */ }
   fmtCache = {};
   TX = allTxns();
+  setTimeout(updateNav, 0);
   $("#exampleBanner").hidden = !isExample();
   const months = monthsOf(TX); const latest = months[0] || new Date().toISOString().slice(0,7);
   if(!S.period || (S.period.length===7 && !months.includes(S.period))) S.period = months[0] || "all";
@@ -1197,7 +1246,7 @@ function renderRegister(list){
   const base = rows;
   if(S.catFilter === "__review") rows = rows.filter(isUnsorted);
   else if(S.catFilter === "__househint") rows = rows.filter(t=>t.hint);
-  else if(S.catFilter === "__repeat") rows = rows.filter(t=>t.rep);
+  else if(S.catFilter === "__repeat") rows = rows.filter(t => t.rep && (S.showReviewed || t.repOpen));
   else if(S.catFilter) rows = rows.filter(t=>t.cat===S.catFilter);
   if(S.amtMin !== null) rows = rows.filter(t => Math.abs(t.a) >= S.amtMin);
   if(S.amtMax !== null) rows = rows.filter(t => Math.abs(t.a) <= S.amtMax);
@@ -1229,15 +1278,15 @@ function renderRegister(list){
     <div class="reg-row ${S.sel.has(keyOf(t))?"picked":""}" data-id="${esc(t.id)}" data-imp="${esc(t.imp)}">
       <span class="cb"><input type="checkbox" class="rsel" aria-label="Select" ${S.sel.has(keyOf(t))?"checked":""} ${ro(t)?"disabled":""}></span>
       <span class="d">${shortDate(t.d)}</span>
-      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.cat==="Investments" && !ro(t) ? ` · <span style="color:var(--c-inv)">${t.ia ? `Account: ${esc(t.ia)}` : "Account not set (see Investments)"}</span>${t.ia ? ` <button type="button" class="linkbtn" data-ia-clear>Change</button>` : ""}` : ""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote ${r.reviewed?"done":""}" title="${esc(r.other.s)}">same amount ${r.other.a < 0 ? "in" : "out"} on ${shortDate(r.other.d)} (${esc(r.other.acct)})${r.reviewed?", marked not a duplicate":""}</span> ${r.reviewed ? `<button type="button" class="linkbtn" data-redup="${esc(r.pk)}">Undo</button>` : `<button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`}`).join(""):""}</small></span>
+      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.cat==="Investments" && !ro(t) ? ` · <span style="color:var(--c-inv)">${t.ia ? `Account: ${esc(t.ia)}` : "Account not set (see Investments)"}</span>${t.ia ? ` <button type="button" class="linkbtn" data-ia-clear>Change</button>` : ""}` : ""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.filter(r => S.showReviewed || !r.reviewed).map(r=>` · <span class="repnote ${r.reviewed?"done":""}" title="${esc(r.other.s)}">same amount ${r.other.a < 0 ? "in" : "out"} on ${shortDate(r.other.d)} (${esc(r.other.acct)})${r.reviewed?", marked not a duplicate":""}</span> ${r.reviewed ? `<button type="button" class="linkbtn" data-redup="${esc(r.pk)}">Undo</button>` : `<button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`}`).join(""):""}</small></span>
       <span class="catc"><select aria-label="Category" class="${isUnsorted(t)&&!ro(t)?"other":""}" ${isUnsorted(t)&&!ro(t)?'title="Not recognised: pick the right category"':""} ${ro(t)?"disabled title=\"Edit this in the Google Sheet\"":""}>${catOptions(t.cat)}</select></span>
       <span class="a ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)}${drcr(t.a)}</span>
       <button class="x" aria-label="Delete this transaction" ${ro(t)?"disabled":""}>×</button>
     </div>`;
   $("#reg").innerHTML = (unrec ? `<p class="inc-note" style="margin:0 0 6px">${unrec} ${unrec===1?"transaction has":"transactions have"} a dashed orange category: Spendbook didn’t recognise the merchant and put ${unrec===1?"it":"them"} in Misc. Pick the right category, or use “Ask Claude to sort unrecognised” in Settings.</p>` : "")
     + `<div class="reg-row head"><span><input type="checkbox" id="selAll" aria-label="Select all shown" ${allOn?"checked":""} ${S.shownKeys.length?"":"disabled"}></span><span><button type="button" data-sort="date" class="${sk==="date"?"on":""}" aria-label="Sort by date">Date ${arrow("date")}</button></span><span>Description</span><span>Category</span><span style="text-align:right"><button type="button" data-sort="amt" class="${sk==="amt"?"on":""}" aria-label="Sort by amount">Amount ${arrow("amt")}</button></span><span></span></div>` +
-    (!shown.length ? `<p class="empty">No transactions match.</p>`
-      : S.catFilter === "__repeat" ? repeatGroupsHtml(rows, rowHtml)
+    (S.catFilter === "__repeat" ? repeatGroupsHtml(rows, rowHtml, base.filter(t => t.rep && !t.repOpen).length)
+      : !shown.length ? `<p class="empty">No transactions match.</p>`
       : shown.map(rowHtml).join(""));
   renderBulk();
   $("#moreBtn").hidden = rows.length <= S.showN;
@@ -1389,6 +1438,8 @@ $("#reg").addEventListener("click", e => {
     toast(same ? `Left out: ${money(t.a,true)} is already in the house sheet.` : `Kept as ${t.c}.`, () => putDoc(row.dataset.imp, before), "Undo");
     return;
   }
+  const rv = e.target.closest("[data-reviewed]");
+  if(rv){ S.showReviewed = rv.dataset.reviewed === "show"; renderAll(); return; }
   const rd = e.target.closest("[data-redup]");
   if(rd){ const pk = rd.dataset.redup; saveSettings({notDup:(settings().notDup||[]).filter(x=>x!==pk)}); return; }
   const nd = e.target.closest("[data-notdup]");
@@ -1465,7 +1516,7 @@ $("#sheetForm").onsubmit = e => {
   const raw = $("#sheetUrl").value.trim(), tab = $("#sheetTab").value.trim() || "House cost";
   if(!raw){ saveSettings({houseSheet: null}); toast("House cost sheet removed."); return; }
   const id = sheetIdFrom(raw); if(!id){ toast("That doesn’t look like a Google Sheet link or ID."); return; }
-  saveSettings({houseSheet: {id, tab}}); document.activeElement.blur(); toast("House cost sheet saved. Use Refresh from sheet to read it.");
+  saveSettings({houseSheet: {id, tab, by: S.fbUser ? S.fbUser.email : ""}}); approveSheet(id); document.activeElement.blur(); toast("House cost sheet saved. Use Refresh from sheet to read it.");
 };
 $("#dateOrder").onchange = e => saveSettings({dateOrder:e.target.value});
 
@@ -1565,7 +1616,7 @@ function spark(vals){
 function renderInvest(periodTx){
   const allInv = TX.filter(t => t.cat==="Investments");
   const perInv = periodTx.filter(t => t.cat==="Investments");
-  const vals = (invDoc().values||[]).slice().sort((a,b)=>a.d.localeCompare(b.d));
+  const vals = (invDoc().values||[]).filter(v => v && isYmd(v.d) && typeof v.v === "number" && isFinite(v.v)).sort((a,b)=>a.d.localeCompare(b.d));
   const accts = invAccounts();
   const rows = accts.map(a => {
     const hist = vals.filter(v=>v.acct===a), last = hist[hist.length-1];
@@ -1723,7 +1774,7 @@ async function readHouseWithSheetsApi(hs){
     const res = await firebase.auth().currentUser.reauthenticateWithPopup(provider);
     sheetsToken = {value: res.credential.accessToken, exp: Date.now() + 50*60*1000};
   }
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${hs.id}/values/${encodeURIComponent("'" + hs.tab + "'")}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(hs.id)}/values/${encodeURIComponent("'" + hs.tab + "'")}`;
   const r = await fetch(url, {headers:{Authorization: "Bearer " + sheetsToken.value}});
   if(!r.ok){
     if(r.status === 401) sheetsToken = null;
@@ -1741,9 +1792,19 @@ async function readHouseWithMcp(hs){
   const text = (p && typeof p === "object" && p.fileContent) || (typeof p === "string" ? p : (r.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n"));
   return parseHouseSheet(String(text||""), hs.tab);
 }
+/* the sheet ID lives in shared settings, so another member could change it; your Google account only
+   reads a sheet you've approved on this device */
+const SHEET_OK = "spendbook-sheets-ok";
+function approvedSheets(){ try{ return JSON.parse(localStorage.getItem(SHEET_OK) || "[]"); }catch(e){ return []; } }
+function approveSheet(id){ try{ const a = approvedSheets(); if(!a.includes(id)) localStorage.setItem(SHEET_OK, JSON.stringify(a.concat(id).slice(-20))); }catch(e){} }
 async function refreshHouse(){
   if(!(S.mcp || S.fbUser) || !S.houseDb || S.houseBusy) return;
   const hs = houseSheet(); if(!hs){ toast("Add your house cost sheet in Settings first."); return; }
+  if(S.fbUser && !approvedSheets().includes(hs.id)){
+    const who = hs.by && hs.by !== S.fbUser.email ? ` (set by ${hs.by})` : "";
+    if(!window.confirm(`Read the house cost sheet with your Google account?\n\nSheet ID: ${hs.id}${who}\nTab: ${hs.tab}\n\nOnly continue if this is your house cost sheet.`)) return;
+    approveSheet(hs.id);
+  }
   S.houseBusy = true; renderImports();
   try{
     const parsed = S.fbUser ? await readHouseWithSheetsApi(hs) : await readHouseWithMcp(hs);
@@ -2172,6 +2233,19 @@ document.addEventListener("keydown", e => {
 });
 $("#histWho").onchange = e => { S.histWho = e.target.value; S.histN = 100; renderHistory(); };
 $("#histLog").addEventListener("click", e => { if(e.target.id === "histMore"){ S.histN += 100; renderHistory(); } });
+
+/* side navigation: hide links to hidden sections, highlight the section in view */
+function updateNav(){ document.querySelectorAll("#sidenav a").forEach(a => { const el = document.getElementById(a.hash.slice(1)); a.hidden = !el || el.hidden; }); }
+if("IntersectionObserver" in window){
+  const seen = new Map();
+  const io = new IntersectionObserver(entries => {
+    for(const e of entries) seen.set(e.target.id, e.isIntersecting ? e.boundingClientRect.top : null);
+    const vis = [...seen].filter(([, top]) => top !== null).sort((a,b) => Math.abs(a[1]) - Math.abs(b[1]));
+    const cur = vis.length ? vis[0][0] : null;
+    document.querySelectorAll("#sidenav a").forEach(a => a.classList.toggle("on", a.hash === "#" + cur));
+  }, {rootMargin: "0px 0px -55% 0px"});
+  document.querySelectorAll("#sidenav a").forEach(a => { const el = document.getElementById(a.hash.slice(1)); if(el) io.observe(el); });
+}
 
 /* ---------- boot ---------- */
 renderAll();
