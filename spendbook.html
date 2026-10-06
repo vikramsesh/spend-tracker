@@ -372,7 +372,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <select id="regAcct" aria-label="Card or account filter"></select>
       <span class="range"><label for="dateFrom">From</label><input type="date" id="dateFrom"><label for="dateTo">to</label><input type="date" id="dateTo"></span>
       <span class="range"><label for="amtMin">Amount $</label><input type="number" id="amtMin" min="0" step="0.01" placeholder="min" inputmode="decimal"><label for="amtMax">to</label><input type="number" id="amtMax" min="0" step="0.01" placeholder="max" inputmode="decimal"></span>
-      <button class="btn small" id="repCheck" type="button" title="Look for the same charge twice within 5 days in all your statements">Check for repeats</button>
+      <button class="btn small" id="repCheck" type="button" title="Look for the same amount twice within 5 days in all your statements">Check for repeats</button>
       <select id="regSort" aria-label="Sort transactions"><option value="date-desc">Newest first</option><option value="date-asc">Oldest first</option><option value="amt-desc">Largest amount first</option><option value="amt-asc">Smallest amount first</option></select>
       <span id="chips" class="row"></span>
     </div>
@@ -960,7 +960,7 @@ function bestHouseMatch(t, payments){
   }
   return best;
 }
-/* same merchant, same amount, charged again within 5 days (any card, any category).
+/* the same amount (to the cent) again within 5 days: any merchant, card, category, money in or out.
    Charges chained within 5 of each other form one group; pairs you marked "not a duplicate"
    stay in the group but no longer count as unreviewed. */
 const REPEAT_DAYS = 5;
@@ -970,9 +970,8 @@ function flagRepeats(list){
   const ok = new Set(settings().notDup || []);
   const groups = {};
   for(const t of list){
-    if(t.imp === "house" || t.imp === "example" || t.a <= 0) continue;
-    /* first word of the merchant only: banks add store numbers and cities differently */
-    const k = Math.round(t.a*100) + "|" + merchantKey(t.s).split(" ")[0];
+    if(t.imp === "house" || t.imp === "example" || !t.a) continue;
+    const k = String(Math.round(Math.abs(t.a)*100));
     (groups[k] = groups[k] || []).push(t);
   }
   for(const [k, g] of Object.entries(groups)){
@@ -1000,7 +999,7 @@ function repeatGroupsHtml(rows, rowHtml){
     .sort((a,b) => b[b.length-1].d.localeCompare(a[a.length-1].d));
   return sets.map(g => {
     const span = dayNum(g[g.length-1].d) - dayNum(g[0].d), open = g.some(t => t.repOpen);
-    return `<div class="rep-group ${open?"":"done"}"><div class="rep-head">${money(g[0].a,true)} · ${g.length} charges${span ? ` over ${span+1} days` : " on the same day"}${open ? "" : " · reviewed"}</div>${g.map(rowHtml).join("")}</div>`;
+    return `<div class="rep-group ${open?"":"done"}"><div class="rep-head">${money(Math.abs(g[0].a),true)} · ${g.length} transactions${span ? ` over ${span+1} days` : " on the same day"}${open ? "" : " · reviewed"}</div>${g.map(rowHtml).join("")}</div>`;
   }).join("");
 }
 function allTxns(){
@@ -1230,7 +1229,7 @@ function renderRegister(list){
     <div class="reg-row ${S.sel.has(keyOf(t))?"picked":""}" data-id="${esc(t.id)}" data-imp="${esc(t.imp)}">
       <span class="cb"><input type="checkbox" class="rsel" aria-label="Select" ${S.sel.has(keyOf(t))?"checked":""} ${ro(t)?"disabled":""}></span>
       <span class="d">${shortDate(t.d)}</span>
-      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.cat==="Investments" && !ro(t) ? ` · <span style="color:var(--c-inv)">${t.ia ? `Account: ${esc(t.ia)}` : "Account not set (see Investments)"}</span>${t.ia ? ` <button type="button" class="linkbtn" data-ia-clear>Change</button>` : ""}` : ""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote ${r.reviewed?"done":""}" title="${esc(r.other.s)}">same charge on ${shortDate(r.other.d)} (${esc(r.other.acct)})${r.reviewed?", marked not a duplicate":""}</span> ${r.reviewed ? `<button type="button" class="linkbtn" data-redup="${esc(r.pk)}">Undo</button>` : `<button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`}`).join(""):""}</small></span>
+      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.cat==="Investments" && !ro(t) ? ` · <span style="color:var(--c-inv)">${t.ia ? `Account: ${esc(t.ia)}` : "Account not set (see Investments)"}</span>${t.ia ? ` <button type="button" class="linkbtn" data-ia-clear>Change</button>` : ""}` : ""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.map(r=>` · <span class="repnote ${r.reviewed?"done":""}" title="${esc(r.other.s)}">same amount ${r.other.a < 0 ? "in" : "out"} on ${shortDate(r.other.d)} (${esc(r.other.acct)})${r.reviewed?", marked not a duplicate":""}</span> ${r.reviewed ? `<button type="button" class="linkbtn" data-redup="${esc(r.pk)}">Undo</button>` : `<button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`}`).join(""):""}</small></span>
       <span class="catc"><select aria-label="Category" class="${isUnsorted(t)&&!ro(t)?"other":""}" ${isUnsorted(t)&&!ro(t)?'title="Not recognised: pick the right category"':""} ${ro(t)?"disabled title=\"Edit this in the Google Sheet\"":""}>${catOptions(t.cat)}</select></span>
       <span class="a ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)}${drcr(t.a)}</span>
       <button class="x" aria-label="Delete this transaction" ${ro(t)?"disabled":""}>×</button>
