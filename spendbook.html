@@ -435,6 +435,11 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
           <select id="dateOrder"><option value="auto">Detect automatically</option><option value="dmy">Day first (31/01/2026)</option><option value="mdy">Month first (01/31/2026)</option></select></label>
       </div>
       <div class="field"><span>Your category rules</span><div class="rules" id="rules"></div></div>
+      <div class="field"><span>Your own categories</span>
+        <div class="rules" id="catsList"></div>
+        <form class="row" id="catAdd"><input type="text" id="catNew" maxlength="40" placeholder="e.g. Kids" aria-label="New category name" style="flex:1 1 180px"><select id="catKind" aria-label="How it counts"></select><button class="btn small" type="submit">Add</button></form>
+        <small class="muted" id="catNote"></small>
+      </div>
       <div class="field"><span>Your cards and accounts</span>
         <div class="rules" id="cardsList"></div>
         <form class="row" id="cardAdd"><input type="text" id="cardNew" placeholder="e.g. Rewards Visa" aria-label="New card or account name" style="flex:1 1 200px"><button class="btn small" type="submit">Add</button></form>
@@ -537,6 +542,23 @@ const CAT_KIND = Object.fromEntries(CATS);
 const CAT_NAMES = CATS.map(c => c[0]);
 const SPEND_CATS = CATS.filter(c => c[1]==="spend").map(c => c[0]);
 const CAT_COLOR = {"House":"var(--c-house)","Car":"var(--c-car)","Groceries":"var(--c-groc)","Gas + Costco":"var(--c-gas)","Travel":"var(--c-travel)","Dining Out + Entertainment":"var(--c-dine)","Utilities":"var(--c-util)","Misc.":"var(--c-misc)","Income":"var(--c-income)","Investments":"var(--c-inv)"};
+/* categories you add (settings.cats) join the built-in lists; only the book's category admin may change them */
+const CUSTOM_KINDS = {spend:"Spending", in:"Money in", invest:"Investment", transfer:"Not counted"};
+const customCats = () => (Array.isArray(S.docs.settings?.cats) ? S.docs.settings.cats : [])
+  .filter(c => c && typeof c.name === "string" && c.name.trim() && CUSTOM_KINDS[c.kind]);
+const catHue = name => [...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
+let customApplied = [];
+function syncCustomCats(){
+  for(const n of customApplied){ delete CAT_KIND[n]; delete CAT_COLOR[n]; for(const a of [CAT_NAMES, SPEND_CATS]){ const i = a.indexOf(n); if(i >= 0) a.splice(i, 1); } }
+  customApplied = [];
+  for(const c of customCats()){
+    const n = c.name.trim(); if(CAT_KIND[n]) continue;
+    CAT_KIND[n] = c.kind; CAT_COLOR[n] = `hsl(${catHue(n)} 45% 52%)`;
+    CAT_NAMES.splice(CAT_NAMES.indexOf("Investments"), 0, n);
+    if(c.kind === "spend") SPEND_CATS.push(n);
+    customApplied.push(n);
+  }
+}
 /* older category names (saved overrides and rules) map onto the new groups */
 const LEGACY = {"Food & dining":"Dining Out + Entertainment","Entertainment":"Dining Out + Entertainment","Subscriptions":"Dining Out + Entertainment","Transport":"Travel","Bills & utilities":"Utilities","Rent & housing":"House","Shopping":"Misc.","Health":"Misc.","Education":"Misc.","Insurance":"Misc.","EMI & loans":"Misc.","Fees & charges":"Misc.","Cash withdrawal":"Misc.","Personal care":"Misc.","Gifts & donations":"Misc.","Other":"Misc."};
 const normCat = c => LEGACY[c] || (CAT_KIND[c] ? c : "Misc.");
@@ -792,6 +814,9 @@ function describeChanges(changes){
       if(nd > 0) parts.push("Marked a repeated charge as not a duplicate"); else if(nd < 0) parts.push("Unmarked a not-a-duplicate charge");
       if(b.currency !== undefined && a.currency !== b.currency) parts.push(`Changed currency to ${a.currency}`);
       if(b.dateOrder !== undefined && a.dateOrder !== b.dateOrder) parts.push("Changed how statement dates are read");
+      const bN = (b.cats||[]).map(c => c.name), aN = (a.cats||[]).map(c => c.name);
+      for(const n of aN) if(!bN.includes(n)) parts.push(`Added category ${n}`);
+      for(const n of bN) if(!aN.includes(n)) parts.push(`Deleted category ${n}`);
       if(stableStr(a.cards) !== stableStr(b.cards) && Array.isArray(a.cards)){
         const was = Array.isArray(b.cards) ? b.cards : derivedCards();
         for(const c of a.cards) if(!was.includes(c)) parts.push(`Added card ${c}`);
@@ -1097,6 +1122,7 @@ let TX = [];
 function renderAll(){
   if(!S.loaded && !Object.keys(S.docs).length){ /* keep example view while connecting */ }
   fmtCache = {};
+  syncCustomCats();
   TX = allTxns();
   setTimeout(updateNav, 0);
   $("#exampleBanner").hidden = !isExample();
@@ -1346,6 +1372,14 @@ function renderSettings(){
   $("#dateOrder").value = st.dateOrder;
   $("#rules").innerHTML = st.rules.length ? st.rules.map((r,i)=>`<span class="rule">“${esc(r.m)}” → ${esc(r.c)}<button data-rule="${i}" aria-label="Remove rule">×</button></span>`).join("")
     : `<span class="muted" style="font-size:.85rem">None yet. Change a transaction’s category and you’ll be offered a rule for that merchant.</span>`;
+  /* only the category admin (the first account to add one, enforced by Firestore rules) sees the controls */
+  const admin = st.catAdmin, me = S.fbUser && S.fbUser.email, canEdit = !admin || !me || admin === me;
+  const cc = customCats();
+  $("#catsList").innerHTML = cc.length ? cc.map((c,i)=>`<span class="rule">${esc(c.name)} · ${CUSTOM_KINDS[c.kind]}${canEdit ? `<button type="button" data-cat-rm="${i}" aria-label="Delete ${esc(c.name)}">×</button>` : ""}</span>`).join("")
+    : `<span class="muted" style="font-size:.85rem">None yet. The built-in categories are always available.</span>`;
+  $("#catAdd").hidden = !canEdit;
+  if(!$("#catKind").options.length) $("#catKind").innerHTML = Object.entries(CUSTOM_KINDS).map(([k,l])=>`<option value="${k}">${l}</option>`).join("");
+  $("#catNote").textContent = canEdit ? "Spending categories count in Spent; “Not counted” ones are left out of every total." : `Only ${admin} can add or delete categories.`;
   const cards = cardList();
   $("#cardsList").innerHTML = cards.length ? cards.map((c,i)=>`<span class="rule">${esc(c)}<button type="button" data-card-rm="${i}" aria-label="Remove ${esc(c)}">×</button></span>`).join("")
     : `<span class="muted" style="font-size:.85rem">None yet. Add the cards and accounts your statements come from.</span>`;
@@ -1362,7 +1396,7 @@ function renderBulk(){
   for(const k of [...S.sel]) if(!live.has(k)) S.sel.delete(k);
   $("#bulkBar").hidden = !S.sel.size;
   $("#bulkN").textContent = `${S.sel.size} selected`;
-  if(!$("#bulkCat").options.length) $("#bulkCat").innerHTML = CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
+  $("#bulkCat").innerHTML = CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
 }
 $("#reg").addEventListener("change", e => {
   if(e.target.id === "selAll"){ const on = e.target.checked; S.shownKeys.forEach(k => on ? S.sel.add(k) : S.sel.delete(k)); renderAll(); return; }
@@ -1501,6 +1535,20 @@ $("#imports").addEventListener("click", e => {
 });
 $("#rules").addEventListener("click", e => { const i = e.target.dataset.rule; if(i===undefined) return; const rules = settings().rules.slice(); rules.splice(+i,1); saveSettings({rules}); });
 $("#currency").onchange = e => saveSettings({currency:e.target.value});
+$("#catAdd").onsubmit = e => {
+  e.preventDefault(); const name = $("#catNew").value.trim().replace(/\s+/g, " "); if(!name) return;
+  if(CAT_NAMES.some(c => c.toLowerCase() === name.toLowerCase()) || LEGACY[name]){ toast(`There’s already a category called ${name}.`); return; }
+  const patch = {cats: customCats().concat({name, kind: $("#catKind").value})};
+  if(!settings().catAdmin && S.fbUser) patch.catAdmin = S.fbUser.email;
+  saveSettings(patch); $("#catNew").value = "";
+};
+$("#catsList").addEventListener("click", e => {
+  const i = e.target.dataset.catRm; if(i === undefined) return;
+  const cats = customCats().slice(), [gone] = cats.splice(+i, 1);
+  const used = TX.filter(t => t.cat === gone.name).length;
+  if(used && !window.confirm(`${used} transaction${used===1?" is":"s are"} in ${gone.name}. They’ll show as Misc. until you re-categorise them. Delete ${gone.name}?`)) return;
+  saveSettings({cats});
+});
 $("#cardAdd").onsubmit = e => {
   e.preventDefault(); const name = $("#cardNew").value.trim(); if(!name) return;
   const cards = cardList();
@@ -1766,7 +1814,7 @@ function parseHouseCells(cells){
 }
 /* hosted version: read the tab with the signed-in Google account (needs the Google Sheets API turned on) */
 let sheetsToken = null;
-async function readHouseWithSheetsApi(hs){
+async function readHouseWithSheetsApi(hs, retried){
   if(!sheetsToken || Date.now() > sheetsToken.exp){
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.addScope("https://www.googleapis.com/auth/spreadsheets.readonly");
@@ -1777,12 +1825,13 @@ async function readHouseWithSheetsApi(hs){
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(hs.id)}/values/${encodeURIComponent("'" + hs.tab + "'")}`;
   const r = await fetch(url, {headers:{Authorization: "Bearer " + sheetsToken.value}});
   if(!r.ok){
-    if(r.status === 401) sheetsToken = null;
+    /* expired or revoked token: get a fresh one once */
+    if(r.status === 401){ sheetsToken = null; if(!retried) return readHouseWithSheetsApi(hs, true); }
     const msg = ((await r.json().catch(() => null)) || {}).error?.message || "";
     throw new Error(r.status === 403 && /has not been used|is disabled/i.test(msg) ? "Turn on the Google Sheets API for this Firebase project, then try again."
       : r.status === 403 || r.status === 404 ? `${S.fbUser.email} can’t open the house cost sheet. Share the sheet with this account, then try again.`
       : r.status === 400 ? `Couldn’t find a tab named “${hs.tab}” in the sheet.`
-      : "Couldn’t read the sheet. Try again in a moment.");
+      : `Google Sheets refused the request (${r.status}${msg ? `: ${msg}` : ""}).`);
   }
   return parseHouseCells((await r.json()).values || []);
 }
@@ -1819,7 +1868,9 @@ async function refreshHouse(){
       : c==="server_not_connected" ? "Connect Google Drive in claude.ai Settings → Connectors, then try again."
       : c==="needs_reauth" ? "Reconnect Google Drive in claude.ai Settings → Connectors, then try again."
       : c==="not_granted" || c==="cancelled" ? "Spendbook needs permission to read the sheet from Google Drive."
-      : (e && e.message && !c) ? e.message : "Couldn’t read the sheet. Try again in a moment.");
+      : c==="permission-denied" ? "Read the sheet, but Firestore refused to save it. Check your Firestore rules allow books/shared/meta."
+      : (e && e.message && !c) ? e.message
+      : `Couldn’t read the sheet (${[c, e && e.message].filter(Boolean).join(": ") || "unknown error"}).`);
   }finally{ S.houseBusy = false; renderImports(); }
 }
 $("#imports").addEventListener("click", e => {

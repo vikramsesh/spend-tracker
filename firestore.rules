@@ -10,9 +10,21 @@ service cloud.firestore {
         && request.auth.token.email in ['first.person@gmail.com', 'second.person@gmail.com'];
     }
 
+    // The one account allowed to add or delete categories (settings.cats / settings.catAdmin)
+    function isCategoryAdmin() {
+      return request.auth.token.email == 'category.admin@gmail.com';
+    }
+    function touchesCategories() {
+      return resource == null
+        ? request.resource.data.keys().hasAny(['cats', 'catAdmin'])
+        : request.resource.data.diff(resource.data).affectedKeys().hasAny(['cats', 'catAdmin']);
+    }
+
     // Statements, settings, investment values and the house sheet copy
     match /books/shared/docs/{id} {
-      allow read, write: if isMember();
+      allow read: if isMember();
+      allow create, update: if isMember() && (id != 'settings' || !touchesCategories() || isCategoryAdmin());
+      allow delete: if isMember() && (id != 'settings' || isCategoryAdmin());
     }
     match /books/shared/meta/{id} {
       allow read, write: if isMember();
