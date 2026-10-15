@@ -10,14 +10,14 @@ service cloud.firestore {
         && request.auth.token.email in ['first.person@gmail.com', 'second.person@gmail.com'];
     }
 
-    // The one account allowed to add or delete categories (settings.cats / settings.catAdmin)
+    // The one account allowed to add, rename or delete categories (settings.cats, catLabels, catDeleted, catAdmin)
     function isCategoryAdmin() {
       return request.auth.token.email == 'category.admin@gmail.com';
     }
     function touchesCategories() {
       return resource == null
-        ? request.resource.data.keys().hasAny(['cats', 'catAdmin'])
-        : request.resource.data.diff(resource.data).affectedKeys().hasAny(['cats', 'catAdmin']);
+        ? request.resource.data.keys().hasAny(['cats', 'catAdmin', 'catLabels', 'catDeleted'])
+        : request.resource.data.diff(resource.data).affectedKeys().hasAny(['cats', 'catAdmin', 'catLabels', 'catDeleted']);
     }
 
     // Statements, settings, investment values and the house sheet copy

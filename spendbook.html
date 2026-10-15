@@ -157,6 +157,17 @@ header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-con
 .hist{display:flex;flex-direction:column;font-size:.85rem}
 .hist div{display:grid;grid-template-columns:minmax(0,1fr) auto auto 2rem;gap:10px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}
 .inc-note{font-size:.8rem;color:var(--muted)}
+.admin-sec{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.admin-sec h3{margin:0;font-size:1rem}
+.admin-cats{display:flex;flex-direction:column}
+.admin-cat{display:grid;grid-template-columns:12px minmax(0,1fr) 7rem 4.5rem auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:.88rem}
+.admin-cat input{width:100%;padding:4px 6px}
+.admin-cat .muted{font-size:.78rem}
+@media (max-width:560px){.admin-cat{grid-template-columns:12px minmax(0,1fr) auto}.admin-cat .kind,.admin-cat .cnt{display:none}}
+.rev{border-bottom:1px solid var(--line);padding:6px 0;font-size:.86rem}
+.rev b{font-family:var(--f-mono)}
+.rev ul{margin:4px 0 0;padding-left:18px;color:var(--muted)}
+.foot{text-align:center;color:var(--muted);font-size:.78rem;padding-top:8px}
 .month-wrap{position:relative;display:inline-flex}
 .month-pick{position:absolute;top:calc(100% + 6px);right:0;z-index:15;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;width:300px;box-shadow:0 8px 24px rgb(0 0 0 / .18);display:flex;flex-direction:column;gap:8px}
 .month-pick[hidden]{display:none}
@@ -319,7 +330,6 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
   <a href="#register">Transactions</a>
   <a href="#importsPanel">Statements &amp; accounts</a>
   <a href="#settingsPanel">Settings</a>
-  <a href="#historyPanel">Change history</a>
 </nav>
 <div class="wrap">
   <header class="top">
@@ -333,6 +343,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <span class="month-wrap"><button class="btn" id="monthsBtn" type="button" aria-haspopup="dialog" aria-expanded="false">Months…</button>
         <div class="month-pick" id="monthPick" role="dialog" aria-label="Choose months" hidden></div></span>
       <select id="acctFilter" aria-label="Account"></select>
+      <button class="btn" id="adminBtn" type="button" hidden>Admin</button>
       <button class="btn primary" id="uploadBtn">Upload statements</button>
       <button class="btn undo" id="undoBtn" type="button" hidden><span aria-hidden="true">↶</span> Undo<span class="undo-what" id="undoWhat"></span></button>
     </div>
@@ -435,11 +446,6 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
           <select id="dateOrder"><option value="auto">Detect automatically</option><option value="dmy">Day first (31/01/2026)</option><option value="mdy">Month first (01/31/2026)</option></select></label>
       </div>
       <div class="field"><span>Your category rules</span><div class="rules" id="rules"></div></div>
-      <div class="field"><span>Your own categories</span>
-        <div class="rules" id="catsList"></div>
-        <form class="row" id="catAdd"><input type="text" id="catNew" maxlength="40" placeholder="e.g. Kids" aria-label="New category name" style="flex:1 1 180px"><select id="catKind" aria-label="How it counts"></select><button class="btn small" type="submit">Add</button></form>
-        <small class="muted" id="catNote"></small>
-      </div>
       <div class="field"><span>Your cards and accounts</span>
         <div class="rules" id="cardsList"></div>
         <form class="row" id="cardAdd"><input type="text" id="cardNew" placeholder="e.g. Rewards Visa" aria-label="New card or account name" style="flex:1 1 200px"><button class="btn small" type="submit">Add</button></form>
@@ -495,10 +501,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       </details>
     </section>
   </div>
-  <section class="panel" id="historyPanel" hidden>
-    <div class="panel-head"><h2>Change history</h2><select id="histWho" aria-label="Show changes made by"></select></div>
-    <div class="hist-log" id="histLog"></div>
-  </section>
+  <footer class="foot" id="foot"></footer>
 </div>
 </div>
 
@@ -519,6 +522,27 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
 </div>
 
 <datalist id="acctList"></datalist>
+<div class="overlay" id="adminMenu" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
+    <div class="sheet-head"><h2 id="adminTitle">Admin</h2><button class="btn ghost" type="button" data-close="adminMenu" aria-label="Close">✕</button></div>
+    <section class="admin-sec">
+      <h3>Categories</h3>
+      <div class="admin-cats" id="adminCats"></div>
+      <form class="row" id="catAdd"><input type="text" id="catNew" maxlength="40" placeholder="New category, e.g. Kids" aria-label="New category name" style="flex:1 1 200px"><select id="catKind" aria-label="How it counts"></select><button class="btn small primary" type="submit">Add category</button></form>
+      <div id="adminDeleted"></div>
+      <small class="muted">Renaming changes only the name you see; transactions, rules and keywords keep working. Deleting moves its transactions to Misc. until you re-categorise them.</small>
+    </section>
+    <section class="admin-sec">
+      <div class="row" style="justify-content:space-between"><h3>Change history</h3><select id="histWho" aria-label="Show changes made by"></select></div>
+      <div class="hist-log" id="histLog"></div>
+    </section>
+    <section class="admin-sec">
+      <h3>Versions</h3>
+      <small class="muted">Major.Minor.Patch: major = a change in how the app works or stores data, minor = new features, patch = fixes and small tweaks.</small>
+      <div class="rev-list" id="revList"></div>
+    </section>
+  </div>
+</div>
 <div class="overlay" id="undoAsk" hidden>
   <div class="sheet narrow" role="alertdialog" aria-modal="true" aria-labelledby="undoAskTitle" aria-describedby="undoAskText">
     <div class="sheet-head"><h2 id="undoAskTitle">Undo this change?</h2></div>
@@ -547,18 +571,27 @@ const CUSTOM_KINDS = {spend:"Spending", in:"Money in", invest:"Investment", tran
 const customCats = () => (Array.isArray(S.docs.settings?.cats) ? S.docs.settings.cats : [])
   .filter(c => c && typeof c.name === "string" && c.name.trim() && CUSTOM_KINDS[c.kind]);
 const catHue = name => [...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 360, 7);
-let customApplied = [];
+/* built-ins the app's own logic depends on can be renamed but never deleted */
+const KEEP_CATS = ["House", "Misc.", "Income", "Investments", "Transfers", "In house sheet"];
+const BASE_COLOR = {...CAT_COLOR};
+const deletedCats = () => (Array.isArray(S.docs.settings?.catDeleted) ? S.docs.settings.catDeleted : []).filter(n => !KEEP_CATS.includes(n));
+/* rebuild the category tables from the built-ins, minus deleted ones, plus your own */
 function syncCustomCats(){
-  for(const n of customApplied){ delete CAT_KIND[n]; delete CAT_COLOR[n]; for(const a of [CAT_NAMES, SPEND_CATS]){ const i = a.indexOf(n); if(i >= 0) a.splice(i, 1); } }
-  customApplied = [];
-  for(const c of customCats()){
-    const n = c.name.trim(); if(CAT_KIND[n]) continue;
-    CAT_KIND[n] = c.kind; CAT_COLOR[n] = `hsl(${catHue(n)} 45% 52%)`;
-    CAT_NAMES.splice(CAT_NAMES.indexOf("Investments"), 0, n);
-    if(c.kind === "spend") SPEND_CATS.push(n);
-    customApplied.push(n);
+  const del = new Set(deletedCats());
+  const own = customCats().map(c => [c.name.trim(), c.kind]).filter(([n]) => !CATS.some(b => b[0] === n));
+  const all = CATS.filter(([n]) => !del.has(n));
+  all.splice(all.findIndex(([n]) => n === "Investments"), 0, ...own);
+  for(const k of Object.keys(CAT_KIND)) delete CAT_KIND[k];
+  for(const k of Object.keys(CAT_COLOR)) delete CAT_COLOR[k];
+  CAT_NAMES.length = 0; SPEND_CATS.length = 0;
+  for(const [n, kind] of all){
+    CAT_KIND[n] = kind; CAT_COLOR[n] = BASE_COLOR[n] || `hsl(${catHue(n)} 45% 52%)`;
+    CAT_NAMES.push(n); if(kind === "spend") SPEND_CATS.push(n);
   }
 }
+/* the name shown for a category: your rename, or its own name */
+const catLabel = c => { const l = S.docs.settings?.catLabels?.[c]; return typeof l === "string" && l.trim() ? l : c; };
+const isAdmin = () => { const a = settings().catAdmin, me = S.fbUser && S.fbUser.email; return !a || !me || a === me; };
 /* older category names (saved overrides and rules) map onto the new groups */
 const LEGACY = {"Food & dining":"Dining Out + Entertainment","Entertainment":"Dining Out + Entertainment","Subscriptions":"Dining Out + Entertainment","Transport":"Travel","Bills & utilities":"Utilities","Rent & housing":"House","Shopping":"Misc.","Health":"Misc.","Education":"Misc.","Insurance":"Misc.","EMI & loans":"Misc.","Fees & charges":"Misc.","Cash withdrawal":"Misc.","Personal care":"Misc.","Gifts & donations":"Misc.","Other":"Misc."};
 const normCat = c => LEGACY[c] || (CAT_KIND[c] ? c : "Misc.");
@@ -605,7 +638,7 @@ function loadHidden(){ try{ return new Set(JSON.parse(localStorage.getItem("spen
 function saveHidden(){ try{ localStorage.setItem("spendbook-hidden", JSON.stringify([...S.hiddenCats])); }catch(e){} }
 const S = {
   house:null, houseDb:null, mcp:null, houseBusy:false,
-  docs:{}, loaded:false, mode:"memory", fbUser:null, localCopy:null, logCol:null, log:[], histWho:"all", histN:100,
+  docs:{}, loaded:false, mode:"memory", fbUser:null, localCopy:null, logCol:null, log:[], histWho:"all", histN:10,
   period:null, months:[], account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), showReviewed:false, catFilter:"", search:"", dateFrom:"", dateTo:"", amtMin:null, amtMax:null, showN:150,
   stages:[], sample:null, downloads:null, imgLimits:null,
 };
@@ -817,6 +850,11 @@ function describeChanges(changes){
       const bN = (b.cats||[]).map(c => c.name), aN = (a.cats||[]).map(c => c.name);
       for(const n of aN) if(!bN.includes(n)) parts.push(`Added category ${n}`);
       for(const n of bN) if(!aN.includes(n)) parts.push(`Deleted category ${n}`);
+      const bL = b.catLabels || {}, aL = a.catLabels || {};
+      for(const k of new Set([...Object.keys(bL), ...Object.keys(aL)])) if(bL[k] !== aL[k] && aN.includes(k) === bN.includes(k)) parts.push(aL[k] ? `Renamed ${bL[k] || k} to ${aL[k]}` : `Renamed ${bL[k]} back to ${k}`);
+      const bD = b.catDeleted || [], aD = a.catDeleted || [];
+      for(const n of aD) if(!bD.includes(n)) parts.push(`Deleted category ${n}`);
+      for(const n of bD) if(!aD.includes(n)) parts.push(`Restored category ${n}`);
       if(stableStr(a.cards) !== stableStr(b.cards) && Array.isArray(a.cards)){
         const was = Array.isArray(b.cards) ? b.cards : derivedCards();
         for(const c of a.cards) if(!was.includes(c)) parts.push(`Added card ${c}`);
@@ -857,8 +895,7 @@ function logChange(text){
     .catch(() => toast("Couldn’t record this change in the history."));
 }
 function renderHistory(){
-  const panel = $("#historyPanel"); panel.hidden = !S.logCol; updateNav();
-  if(!S.logCol) return;
+  if(!S.logCol){ $("#histLog").innerHTML = `<p class="empty">Change history is recorded when you’re signed in to the shared book.</p>`; return; }
   const who = [...new Set(S.log.map(e => e.email))].sort();
   if(S.histWho !== "all" && !who.includes(S.histWho)) S.histWho = "all";
   $("#histWho").innerHTML = `<option value="all">Everyone</option>` + who.map(w => `<option value="${esc(w)}">${esc(w)}</option>`).join("");
@@ -866,7 +903,8 @@ function renderHistory(){
   const list = S.log.filter(e => S.histWho === "all" || e.email === S.histWho);
   $("#histLog").innerHTML = list.length
     ? list.slice(0, S.histN).map(e => `<div class="h-row"><span class="h-when">${esc(isNaN(e.when) ? "" : e.when.toLocaleString([], {dateStyle:"medium", timeStyle:"short"}))}</span><span class="h-who" title="${esc(e.email)}">${esc(e.email)}</span><span>${esc(e.text)}</span></div>`).join("")
-      + (list.length > S.histN ? `<button class="btn small" id="histMore" type="button" style="margin-top:8px;align-self:flex-start">Show more</button>` : "")
+      + (list.length > S.histN ? `<div class="row" style="margin-top:8px"><span class="muted" style="font-size:.82rem">Showing ${S.histN} of ${list.length}</span><button class="btn small" id="histMore" type="button">Show 10 more</button><button class="btn small" id="histAll" type="button">Show all</button></div>`
+        : list.length > 10 ? `<button class="btn small" id="histLess" type="button" style="margin-top:8px;align-self:flex-start">Show fewer</button>` : "")
     : `<p class="empty">No changes recorded yet.</p>`;
 }
 function setBadge(){
@@ -1182,8 +1220,8 @@ function renderCats(list){
   $("#overall").innerHTML = `<div class="total-line"><span class="big">${money(total)}</span><span class="muted">spent in ${esc(pl)}</span></div>
     ${total>0 ? `<div class="comp" role="img" aria-label="Share of spend by category">${pos.map(([c,v])=>`<i style="flex:${v} 1 0;background:${CAT_COLOR[c]}" title="${esc(c)}: ${money(v)} (${Math.round(v/total*100)}%)"></i>`).join("")}</div>` : ""}`;
   $("#cats").innerHTML = total>0 ? rows.map(([c,v]) => `
-    <button class="cat-row ${S.catFilter===c?"on":""}" data-cat="${esc(c)}" title="Show ${esc(c)} transactions">
-      <span class="nm"><i class="sw" style="background:${CAT_COLOR[c]}"></i><span>${esc(c)}</span></span><span class="bar"><i style="width:${(Math.max(0,v)/max*100).toFixed(1)}%;background:${CAT_COLOR[c]}"></i></span>
+    <button class="cat-row ${S.catFilter===c?"on":""}" data-cat="${esc(c)}" title="Show ${esc(catLabel(c))} transactions">
+      <span class="nm"><i class="sw" style="background:${CAT_COLOR[c]}"></i><span>${esc(catLabel(c))}</span></span><span class="bar"><i style="width:${(Math.max(0,v)/max*100).toFixed(1)}%;background:${CAT_COLOR[c]}"></i></span>
       <span class="amt">${money(Math.max(0,v))}<small>${Math.round(Math.max(0,v)/total*100)}%</small></span></button>`).join("")
     : `<p class="empty">No spending in this period.</p>`;
   const inc = list.filter(t=>t.cat==="Income").reduce((s,t)=>s-t.a,0);
@@ -1210,7 +1248,7 @@ function renderTrend(list, anchor, picked){
   months.forEach((m,i) => {
     const x = L + i*bw + bw*0.16, w = bw*0.68, sel = picked ? picked.has(m) : m===anchor; let y = T+ih;
     for(const c of shown){ const v = Math.max(0, stacks[i][c]||0); if(!v) continue; const h = ih*v/mx; y -= h;
-      g += `<rect x="${x}" y="${y}" width="${w}" height="${Math.max(h-0.8,0.6)}" fill="${CAT_COLOR[c]}" opacity="${sel?1:0.75}"><title>${monthLabel(m)} · ${c}: ${money(v)}</title></rect>`; }
+      g += `<rect x="${x}" y="${y}" width="${w}" height="${Math.max(h-0.8,0.6)}" fill="${CAT_COLOR[c]}" opacity="${sel?1:0.75}"><title>${monthLabel(m)} · ${esc(catLabel(c))}: ${money(v)}</title></rect>`; }
     g += `<text x="${x+w/2}" y="${H-8}" text-anchor="middle" style="${sel?"fill:var(--fg);font-weight:600":""}">${MON_T[+m.slice(5)-1]}</text>`;
     if(sel && vals[i]>0) g += `<text x="${x+w/2}" y="${Math.max(10,T+ih-ih*vals[i]/mx-5)}" text-anchor="${i===11?"end":"middle"}" style="fill:var(--fg)">${compact(vals[i])}</text>`;
   });
@@ -1240,7 +1278,7 @@ function renderTop(list){
   $("#topNote").textContent = S.period==="all" ? "all time" : S.period==="l12" ? "last 12 months" : periodName();
   $("#tops").innerHTML = cats.length ? cats.map(c => {
     const items = by[c].slice().sort((a,b)=>b.a-a.a), tot = items.reduce((s,t)=>s+t.a,0);
-    return `<div class="topcat"><h3><span><i class="sw" style="background:${CAT_COLOR[c]}"></i>${esc(c)}</span><span class="num">${money(tot)}</span></h3>
+    return `<div class="topcat"><h3><span><i class="sw" style="background:${CAT_COLOR[c]}"></i>${esc(catLabel(c))}</span><span class="num">${money(tot)}</span></h3>
       ${items.slice(0,3).map((t,i)=>`<div class="toprow"><span class="rk">${i+1}</span>
         <span class="what"><div title="${esc(t.s)}">${esc(t.s)}</div><small>${shortDate(t.d)} <span class="src">${esc(t.acct)}</span></small></span>
         <span class="num">${money(t.a,true)}</span></div>`).join("")}</div>`;
@@ -1259,9 +1297,9 @@ function renderMerchants(list){
   $("#merch").innerHTML = rows.length ? rows.map(([k,o]) => `<div><span>${esc(titleCase(k))} <span class="muted" style="font-size:.8rem">× ${o.n}</span></span><span class="num">${money(o.v)}</span></div>`).join("") : `<p class="empty">Nothing yet.</p>`;
 }
 const drcr = a => a < 0 ? `<span class="drcr cr" title="Credit: money in">Cr</span>` : `<span class="drcr db" title="Debit: money out">Db</span>`;
-const catOptions = sel => CAT_NAMES.map(c => `<option ${c===sel?"selected":""}>${esc(c)}</option>`).join("");
+const catOptions = sel => CAT_NAMES.map(c => `<option value="${esc(c)}" ${c===sel?"selected":""}>${esc(catLabel(c))}</option>`).join("");
 function renderRegister(list){
-  $("#catFilter").innerHTML = `<option value="">All categories</option><option value="__review">Not recognised (in Misc.)</option><option value="__househint">Check against house sheet</option><option value="__repeat">Repeated within 5 days</option>` + CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
+  $("#catFilter").innerHTML = `<option value="">All categories</option><option value="__review">Not recognised (in Misc.)</option><option value="__househint">Check against house sheet</option><option value="__repeat">Repeated within 5 days</option>` + CAT_NAMES.map(c=>`<option value="${esc(c)}">${esc(catLabel(c))}</option>`).join("");
   $("#catFilter").value = S.catFilter;
   const racc = [...new Set(list.map(t=>t.acct))].sort();
   if(S.regAcct !== "all" && !racc.includes(S.regAcct)) S.regAcct = "all";
@@ -1284,7 +1322,7 @@ function renderRegister(list){
   const sum = rows.reduce((s,t)=>s+t.a,0);
   const debits = rows.reduce((s,t)=>s+(t.a>0?t.a:0),0), credits = rows.reduce((s,t)=>s+(t.a<0?-t.a:0),0);
   $("#regCount").innerHTML = `${rows.length} ${rows.length===1?"entry":"entries"} · <span class="tot">Debits <b>${money(debits,true)}</b></span> · <span class="tot cr">Credits <b>${money(credits,true)}</b></span> · net ${money(sum,true)}`;
-  $("#chips").innerHTML = (S.catFilter ? `<span class="chip">${esc(S.catFilter==="__review"?"Not recognised":S.catFilter==="__househint"?"Check against house sheet":S.catFilter==="__repeat"?"Repeated within 5 days":S.catFilter)}<button data-clear="cat" aria-label="Clear category filter">×</button></span>` : "")
+  $("#chips").innerHTML = (S.catFilter ? `<span class="chip">${esc(S.catFilter==="__review"?"Not recognised":S.catFilter==="__househint"?"Check against house sheet":S.catFilter==="__repeat"?"Repeated within 5 days":catLabel(S.catFilter))}<button data-clear="cat" aria-label="Clear category filter">×</button></span>` : "")
     + (S.regAcct!=="all" ? `<span class="chip">${esc(S.regAcct)}<button data-clear="acct" aria-label="Clear card filter">×</button></span>` : "")
     + (S.dateFrom || S.dateTo ? `<span class="chip">${S.dateFrom ? shortDate(S.dateFrom) : "Start"} – ${S.dateTo ? shortDate(S.dateTo) : "today"} (instead of the period above)<button data-clear="dates" aria-label="Clear date range">×</button></span>` : "")
     + (S.amtMin !== null || S.amtMax !== null ? `<span class="chip">${S.amtMin !== null && S.amtMax !== null ? `${money(S.amtMin,true)} – ${money(S.amtMax,true)}` : S.amtMin !== null ? `${money(S.amtMin,true)} and above` : `${money(S.amtMax,true)} and below`}<button data-clear="amt" aria-label="Clear amount filter">×</button></span>` : "");
@@ -1372,14 +1410,10 @@ function renderSettings(){
   $("#dateOrder").value = st.dateOrder;
   $("#rules").innerHTML = st.rules.length ? st.rules.map((r,i)=>`<span class="rule">“${esc(r.m)}” → ${esc(r.c)}<button data-rule="${i}" aria-label="Remove rule">×</button></span>`).join("")
     : `<span class="muted" style="font-size:.85rem">None yet. Change a transaction’s category and you’ll be offered a rule for that merchant.</span>`;
-  /* only the category admin (the first account to add one, enforced by Firestore rules) sees the controls */
-  const admin = st.catAdmin, me = S.fbUser && S.fbUser.email, canEdit = !admin || !me || admin === me;
-  const cc = customCats();
-  $("#catsList").innerHTML = cc.length ? cc.map((c,i)=>`<span class="rule">${esc(c.name)} · ${CUSTOM_KINDS[c.kind]}${canEdit ? `<button type="button" data-cat-rm="${i}" aria-label="Delete ${esc(c.name)}">×</button>` : ""}</span>`).join("")
-    : `<span class="muted" style="font-size:.85rem">None yet. The built-in categories are always available.</span>`;
-  $("#catAdd").hidden = !canEdit;
-  if(!$("#catKind").options.length) $("#catKind").innerHTML = Object.entries(CUSTOM_KINDS).map(([k,l])=>`<option value="${k}">${l}</option>`).join("");
-  $("#catNote").textContent = canEdit ? "Spending categories count in Spent; “Not counted” ones are left out of every total." : `Only ${admin} can add or delete categories.`;
+  /* the admin menu belongs to the category admin (the first account to change categories, enforced by Firestore rules) */
+  $("#adminBtn").hidden = !isAdmin();
+  if(!$("#adminMenu").hidden) renderAdmin();
+  $("#foot").textContent = `Spendbook v${REVISIONS[0].v} · ${REVISIONS[0].date}`;
   const cards = cardList();
   $("#cardsList").innerHTML = cards.length ? cards.map((c,i)=>`<span class="rule">${esc(c)}<button type="button" data-card-rm="${i}" aria-label="Remove ${esc(c)}">×</button></span>`).join("")
     : `<span class="muted" style="font-size:.85rem">None yet. Add the cards and accounts your statements come from.</span>`;
@@ -1396,7 +1430,7 @@ function renderBulk(){
   for(const k of [...S.sel]) if(!live.has(k)) S.sel.delete(k);
   $("#bulkBar").hidden = !S.sel.size;
   $("#bulkN").textContent = `${S.sel.size} selected`;
-  $("#bulkCat").innerHTML = CAT_NAMES.map(c=>`<option>${esc(c)}</option>`).join("");
+  $("#bulkCat").innerHTML = CAT_NAMES.map(c=>`<option value="${esc(c)}">${esc(catLabel(c))}</option>`).join("");
 }
 $("#reg").addEventListener("change", e => {
   if(e.target.id === "selAll"){ const on = e.target.checked; S.shownKeys.forEach(k => on ? S.sel.add(k) : S.sel.delete(k)); renderAll(); return; }
@@ -1535,19 +1569,73 @@ $("#imports").addEventListener("click", e => {
 });
 $("#rules").addEventListener("click", e => { const i = e.target.dataset.rule; if(i===undefined) return; const rules = settings().rules.slice(); rules.splice(+i,1); saveSettings({rules}); });
 $("#currency").onchange = e => saveSettings({currency:e.target.value});
+/* ---------- admin menu ---------- */
+/* app versions, newest first: major.minor.patch
+   major = a change in how the app works or stores data, minor = new features, patch = fixes and small tweaks */
+const REVISIONS = [
+  {v:"2.12.0", date:"15 Oct 2026", items:["Admin menu: add, rename and delete categories","Change history moved here, 10 entries at a time","Revision list and revision number at the bottom of the page"]},
+  {v:"2.11.0", date:"15 Oct 2026", items:["Your own categories, changeable by one account only","Google Sheets refresh retries an expired token and shows the real error"]},
+  {v:"2.10.0", date:"6 Oct 2026", items:["Side navigation for every section","Reviewed repeats hidden by default","Security hardening: data checks, script integrity, history rules, sheet confirmation"]},
+  {v:"2.9.1", date:"6 Oct 2026", items:["Repeats matched on amount alone, money in or out, any merchant"]},
+  {v:"2.9.0", date:"6 Oct 2026", items:["Repeats within 5 days in every category, grouped in bordered sets"]},
+  {v:"2.8.0", date:"5 Oct 2026", items:["Check for repeats across all statements","Categories fixed at import; only you change them","Pick several months at once"]},
+  {v:"2.7.1", date:"1 Oct 2026", items:["Credit/debit question required for every import"]},
+  {v:"2.7.0", date:"1 Oct 2026", items:["Cards and house sheet set in Settings","Undo asks before undoing"]},
+  {v:"2.6.0", date:"1 Oct 2026", items:["Change history and undo","Every investment asks for its account","Category guide in Settings"]},
+  {v:"2.5.0", date:"1 Oct 2026", items:["House-sheet matches reviewed by hand","Date and amount range filters"]},
+  {v:"2.4.0", date:"1 Oct 2026", items:["Asks whether negative amounts are credits or debits"]},
+  {v:"2.3.0", date:"1 Oct 2026", items:["Debit and credit totals for filtered transactions","Car category","Add a spend removed"]},
+  {v:"2.2.0", date:"1 Oct 2026", items:["Charges repeated within 3 days flagged","Already-imported rows skipped per card"]},
+  {v:"2.1.0", date:"30 Sep 2026", items:["House cost sheet read through the Google Sheets API"]},
+  {v:"2.0.0", date:"30 Sep 2026", items:["Shared book with Google sign-in (Firebase)"]},
+  {v:"1.0.0", date:"30 Sep 2026", items:["First version: statement import, categories, dashboards, recurring charges, investments"]}
+];
+const revKind = v => { const [, mi, pa] = v.split(".").map(Number); return pa ? "Patch" : mi ? "Minor" : "Major"; };
+function renderAdmin(){
+  const st = settings(), labels = st.catLabels || {}, own = new Set(customCats().map(c => c.name.trim()));
+  const counts = {}; for(const t of TX) counts[t.cat] = (counts[t.cat] || 0) + 1;
+  $("#adminCats").innerHTML = CAT_NAMES.map(c => `<div class="admin-cat" data-cat="${esc(c)}">
+      <i class="sw" style="background:${CAT_COLOR[c]}"></i>
+      <span><input type="text" value="${esc(catLabel(c))}" maxlength="40" aria-label="Name for ${esc(c)}">${labels[c] ? `<small class="muted">was ${esc(c)}</small>` : ""}</span>
+      <span class="kind muted">${own.has(c) ? CUSTOM_KINDS[CAT_KIND[c]] : "built-in"}</span>
+      <span class="cnt muted">${counts[c] || 0} txns</span>
+      <span class="row" style="gap:4px"><button type="button" class="btn small" data-cat-rename>Rename</button>${KEEP_CATS.includes(c) ? "" : `<button type="button" class="btn small danger" data-cat-del>Delete</button>`}</span>
+    </div>`).join("");
+  const del = deletedCats();
+  $("#adminDeleted").innerHTML = del.length ? `<small class="muted">Deleted built-in categories: ${del.map(n => `${esc(n)} <button type="button" class="linkbtn" data-cat-restore="${esc(n)}">Restore</button>`).join(" · ")}</small>` : "";
+  if(!$("#catKind").options.length) $("#catKind").innerHTML = Object.entries(CUSTOM_KINDS).map(([k,l])=>`<option value="${k}">${l}</option>`).join("");
+  renderHistory();
+  $("#revList").innerHTML = REVISIONS.map(r => `<div class="rev"><b>v${esc(r.v)}</b> <span class="flag">${revKind(r.v)}</span> <span class="muted">· ${esc(r.date)}</span><ul>${r.items.map(i => `<li>${esc(i)}</li>`).join("")}</ul></div>`).join("");
+}
+/* category changes also claim the admin role on first use */
+const saveCats = patch => { if(!settings().catAdmin && S.fbUser) patch.catAdmin = S.fbUser.email; saveSettings(patch); };
+const nameTaken = (name, except) => CAT_NAMES.some(c => c !== except && (c.toLowerCase() === name.toLowerCase() || catLabel(c).toLowerCase() === name.toLowerCase())) || !!LEGACY[name];
+$("#adminBtn").onclick = () => { renderAdmin(); $("#adminMenu").hidden = false; };
 $("#catAdd").onsubmit = e => {
   e.preventDefault(); const name = $("#catNew").value.trim().replace(/\s+/g, " "); if(!name) return;
-  if(CAT_NAMES.some(c => c.toLowerCase() === name.toLowerCase()) || LEGACY[name]){ toast(`There’s already a category called ${name}.`); return; }
-  const patch = {cats: customCats().concat({name, kind: $("#catKind").value})};
-  if(!settings().catAdmin && S.fbUser) patch.catAdmin = S.fbUser.email;
-  saveSettings(patch); $("#catNew").value = "";
+  if(nameTaken(name)){ toast(`There’s already a category called ${name}.`); return; }
+  saveCats({cats: customCats().concat({name, kind: $("#catKind").value})}); $("#catNew").value = "";
 };
-$("#catsList").addEventListener("click", e => {
-  const i = e.target.dataset.catRm; if(i === undefined) return;
-  const cats = customCats().slice(), [gone] = cats.splice(+i, 1);
-  const used = TX.filter(t => t.cat === gone.name).length;
-  if(used && !window.confirm(`${used} transaction${used===1?" is":"s are"} in ${gone.name}. They’ll show as Misc. until you re-categorise them. Delete ${gone.name}?`)) return;
-  saveSettings({cats});
+$("#adminMenu").addEventListener("click", e => {
+  const row = e.target.closest(".admin-cat"), c = row && row.dataset.cat;
+  if(e.target.closest("[data-cat-rename]")){
+    const name = row.querySelector("input").value.trim().replace(/\s+/g, " ");
+    const labels = {...(settings().catLabels || {})};
+    if(!name || name === c){ delete labels[c]; }
+    else if(nameTaken(name, c)){ toast(`There’s already a category called ${name}.`); return; }
+    else labels[c] = name;
+    saveCats({catLabels: labels}); return;
+  }
+  if(e.target.closest("[data-cat-del]")){
+    const used = TX.filter(t => t.cat === c).length;
+    if(!window.confirm(`Delete ${catLabel(c)}?${used ? `\n\n${used} transaction${used===1?" is":"s are"} in it. They’ll show as Misc. until you re-categorise them.` : ""}`)) return;
+    const labels = {...(settings().catLabels || {})}; delete labels[c];
+    if(customCats().some(x => x.name.trim() === c)) saveCats({cats: customCats().filter(x => x.name.trim() !== c), catLabels: labels});
+    else saveCats({catDeleted: deletedCats().concat(c), catLabels: labels});
+    return;
+  }
+  const rs = e.target.closest("[data-cat-restore]");
+  if(rs){ saveCats({catDeleted: deletedCats().filter(n => n !== rs.dataset.catRestore)}); return; }
 });
 $("#cardAdd").onsubmit = e => {
   e.preventDefault(); const name = $("#cardNew").value.trim(); if(!name) return;
@@ -1921,8 +2009,8 @@ $("#claudeCatBtn").onclick = async () => {
 
 /* ---------- overlays ---------- */
 document.addEventListener("click", e => { const c = e.target.closest("[data-close]"); if(c) $("#"+c.dataset.close).hidden = true; });
-document.addEventListener("keydown", e => { if(e.key==="Escape"){ $("#importer").hidden = true; $("#undoAsk").hidden = true; } });
-[$("#importer"), $("#undoAsk")].forEach(o => o.addEventListener("mousedown", e => { if(e.target===o) o.hidden = true; }));
+document.addEventListener("keydown", e => { if(e.key==="Escape"){ $("#importer").hidden = true; $("#undoAsk").hidden = true; $("#adminMenu").hidden = true; } });
+[$("#importer"), $("#undoAsk"), $("#adminMenu")].forEach(o => o.addEventListener("mousedown", e => { if(e.target===o) o.hidden = true; }));
 $("#uploadBtn").onclick = $("#bannerUpload").onclick = () => { $("#importer").hidden = false; };
 
 /* ---------- import: files ---------- */
@@ -2282,8 +2370,11 @@ $("#undoYes").onclick = () => { $("#undoAsk").hidden = true; undoLast(); };
 document.addEventListener("keydown", e => {
   if((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !e.target.closest("input, textarea, select, [contenteditable]")){ e.preventDefault(); askUndo(); }
 });
-$("#histWho").onchange = e => { S.histWho = e.target.value; S.histN = 100; renderHistory(); };
-$("#histLog").addEventListener("click", e => { if(e.target.id === "histMore"){ S.histN += 100; renderHistory(); } });
+$("#histWho").onchange = e => { S.histWho = e.target.value; S.histN = 10; renderHistory(); };
+$("#histLog").addEventListener("click", e => {
+  if(e.target.id === "histMore") S.histN += 10; else if(e.target.id === "histAll") S.histN = Infinity; else if(e.target.id === "histLess") S.histN = 10; else return;
+  renderHistory();
+});
 
 /* side navigation: hide links to hidden sections, highlight the section in view */
 function updateNav(){ document.querySelectorAll("#sidenav a").forEach(a => { const el = document.getElementById(a.hash.slice(1)); a.hidden = !el || el.hidden; }); }

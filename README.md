@@ -15,6 +15,7 @@ A personal spend tracker in a single HTML file. Upload bank and credit card stat
 - **Investments**: every investment transaction is assigned to an account you choose, alongside account values you enter.
 - **Transactions list**: search; filter by category, card, date range and amount range; sort by date or amount; debit and credit totals for whatever is shown.
 - **Change history and undo**: every change is recorded with who made it, and any change can be undone (Undo button or Ctrl+Z).
+- **Admin menu**: one account can add, rename and delete categories, review the change history (10 entries at a time) and see what changed in each app version (major.minor.patch). The current version is shown at the bottom of the page.
 
 ## Running it
 
