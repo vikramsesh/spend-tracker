@@ -407,8 +407,6 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <label class="field"><span>Value on</span><input type="date" id="invDate" required></label>
       <label class="field"><span>Account value</span><input type="number" id="invVal" step="0.01" min="0" required placeholder="25000"></label>
       <button class="btn primary" type="submit">Save value</button>
-      <button class="btn" type="button" id="invReadBtn" hidden>Read a brokerage statement</button>
-      <input type="file" id="invFile" accept=".pdf,.csv,.txt" hidden>
     </form>
     <p class="inc-note" style="margin:0">“Put in” is money you moved to these accounts from the bank and card statements you uploaded (the Investments category). Enter each account’s value from its app or monthly statement to track growth.</p>
     <details id="invHistWrap" hidden><summary>Saved values</summary><div class="hist" id="invHist" style="margin-top:8px"></div></details>
@@ -465,7 +463,6 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       </div>
       <details id="howSort"><summary>How sorting works</summary><div id="howSortBody" class="inc-note" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:.84rem"></div></details>
       <div class="row">
-        <button class="btn small" id="claudeCatBtn" hidden>Ask Claude to sort unrecognised</button>
         <button class="btn small" id="exportBtn">Export CSV</button>
       </div>
       <p class="muted" style="font-size:.82rem;margin:0">Card bill payments and transfers between your own accounts go under “Transfers” and are left out of spend, so a card payment from your bank account isn’t counted twice.</p>
@@ -518,7 +515,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
     <div class="sheet-head"><h2 id="impTitle">Upload statements</h2><button class="btn ghost" data-close="importer" aria-label="Close">✕</button></div>
     <label class="drop" id="drop">
       <p><b>Drop files here</b> or click to choose</p>
-      <p class="muted" style="font-size:.88rem">CSV, Excel (.xls, .xlsx) or PDF statements from any bank or card<span id="imgHint" hidden>, or photos of receipts</span>. Files are read in your browser.</p>
+      <p class="muted" style="font-size:.88rem">CSV, Excel (.xls, .xlsx) or PDF statements from any bank or card. Files are read in your browser.</p>
       <input type="file" id="fileIn" multiple accept=".csv,.txt,.xls,.xlsx,.pdf,.tsv" hidden>
     </label>
     <div id="stages" class="stack" style="gap:14px"></div>
@@ -645,10 +642,10 @@ const sheetIdFrom = v => { v = String(v||"").trim(); const m = v.match(/\/d\/([A
 function loadHidden(){ try{ return new Set(JSON.parse(localStorage.getItem("spendbook-hidden")||"[]")); }catch(e){ return new Set(); } }
 function saveHidden(){ try{ localStorage.setItem("spendbook-hidden", JSON.stringify([...S.hiddenCats])); }catch(e){} }
 const S = {
-  house:null, houseDb:null, mcp:null, houseBusy:false,
-  docs:{}, loaded:false, mode:"memory", fbUser:null, localCopy:null, logCol:null, log:[], histWho:"all", histN:10,
+  house:null, houseDb:null, houseBusy:false,
+  docs:{}, loaded:false, mode:"memory", fbUser:null, logCol:null, log:[], histWho:"all", histN:10,
   period:null, months:[], account:"all", sel:new Set(), shownKeys:[], regAcct:"all", regSort:"date-desc", hiddenCats:loadHidden(), showReviewed:false, catFilter:"", search:"", dateFrom:"", dateTo:"", amtMin:null, amtMax:null, showN:150,
-  stages:[], sample:null, downloads:null, imgLimits:null,
+  stages:[],
 };
 const settings = () => Object.assign({currency:guessCurrency(), dateOrder:"auto", rules:[]}, S.docs.settings||{});
 function guessCurrency(){
@@ -753,16 +750,6 @@ function withAutoCat(t){
 }
 /* a spend nothing recognised: it lands in Misc. but is worth a look */
 const isUnsorted = t => !t.c && t.a > 0 && (t.ac ? !!t.u : (!ruleCat(t) && !builtinCat(t.s, t.a)));
-/* one-time: fix the category of transactions imported before categories were stored */
-function freezeExisting(){
-  if(S.frozen) return; S.frozen = true;
-  for(const d of importDocs()){
-    if(!(d.txns||[]).some(t => !t.c && !t.ac)) continue;
-    const doc = structuredClone(S.docs[d.id]);
-    doc.txns = doc.txns.map(t => t.c || t.ac ? t : withAutoCat(t));
-    putDoc(d.id, doc, {silent:true});
-  }
-}
 const STOP = new Set("UPI DR CR POS NEFT IMPS RTGS ACH ECOM ECS NACH MMT INB BIL ONL TXN REF PAYMENT PURCHASE DEBIT CREDIT CARD VISA MASTERCARD RUPAY INR USD TO FROM BY AT THE P2A P2M PVT LTD LIMITED INDIA PRIVATE WWW COM ONLINE PAY SI MANDATE TRANSFER PMT TRF TPT FT IB MB BRANCH NA AND FOR VIA IND BANK SENT RECEIVED COLLECT REQUEST".split(" "));
 function merchantKey(desc){
   const toks = String(desc).toUpperCase().split(/[^A-Z&.']+/).map(t=>t.replace(/^[.']+|[.']+$/g,"")).filter(t => t.length>=3 && !STOP.has(t) && !/^[A-Z]{4}0/.test(t));
@@ -781,10 +768,9 @@ const BOOK = "books/shared";
 const writeChains = {};
 let col = null;
 function persistLocal(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(S.docs)); }catch(e){} }
-function localDocs(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||"{}") || {}; }catch(e){ return {}; } }
-async function putDoc(id, data, opt){
+async function putDoc(id, data){
   if(S.mode === "signin"){ toast("Sign in to save to the shared book."); return; }
-  if(!(opt && opt.silent)) track(id, S.docs[id], data);
+  track(id, S.docs[id], data);
   S.docs[id] = data; renderAll();
   if(S.mode === "cloud"){
     const prev = writeChains[id] || Promise.resolve();
@@ -922,12 +908,9 @@ function renderHistory(){
 function setBadge(){
   const b = $("#storeBadge");
   if(S.mode === "cloud" && S.fbUser){
-    const n = S.localCopy ? Object.keys(S.localCopy).length : 0;
-    b.innerHTML = `<span class="dot ok"></span>Shared book · ${esc(S.fbUser.email)} <button class="linkbtn" data-fb="out">Sign out</button>`
-      + (n ? ` · <button class="linkbtn" data-fb="copy">Copy ${n} saved item${n>1?"s":""} from this browser</button>` : "");
+    b.innerHTML = `<span class="dot ok"></span>Shared book · ${esc(S.fbUser.email)} <button class="linkbtn" data-fb="out">Sign out</button>`;
   }
   else if(S.mode === "signin") b.innerHTML = `<span class="dot"></span>Not signed in <button class="btn small" data-fb="in">Sign in with Google</button>`;
-  else if(S.mode === "cloud") b.innerHTML = `<span class="dot ok"></span>Saved privately to your Claude account`;
   else if(S.mode === "local") b.innerHTML = `<span class="dot"></span>Saved in this browser only`;
   else b.innerHTML = `<span class="dot"></span>Connecting…`;
 }
@@ -944,15 +927,10 @@ function initFirebase(){
       try{ await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
       catch(err){ if(err && err.code !== "auth/popup-closed-by-user" && err.code !== "auth/cancelled-popup-request") toast("Couldn’t sign in. " + (err.message||"")); }
     } else if(act === "out") auth.signOut();
-    else if(act === "copy" && S.localCopy){
-      const local = S.localCopy; S.localCopy = null; setBadge();
-      for(const [id, data] of Object.entries(local)) putDoc(id, data);
-      toast("Copied this browser’s data into the shared book.");
-    }
   });
   auth.onAuthStateChanged(u => {
     unsubs.forEach(f => f()); unsubs = [];
-    S.fbUser = u; S.localCopy = null; S.house = null; S.frozen = false;
+    S.fbUser = u; S.house = null;
     if(!u){ S.logCol = null; S.log = []; renderHistory(); col = null; S.houseDb = null; S.docs = {}; S.mode = "signin"; S.loaded = true; setBadge(); renderAll(); return; }
     col = fs.collection(BOOK + "/docs");
     S.logCol = fs.collection(BOOK + "/log");
@@ -968,65 +946,21 @@ function initFirebase(){
     const denied = err => toast(err && err.code === "permission-denied"
       ? `${u.email} doesn’t have access to this spend book. Ask the owner to add it, then sign in again.`
       : "Lost the connection to the shared book. Reload the page to reconnect.");
-    let checked = false;
     unsubs.push(S.houseDb.onSnapshot(d => { S.house = d.exists ? d.data() : null; renderAll(); }, () => {}));
-    unsubs.push(col.onSnapshot({includeMetadataChanges:true}, snap => {
+    unsubs.push(col.onSnapshot(snap => {
       const m = {};
       snap.docs.forEach(d => { m[d.id] = d.data(); });
       S.docs = m; S.loaded = true;
-      /* first time the server answers with an empty book: offer what this browser saved before */
-      if(!checked && !snap.metadata.fromCache){
-        checked = true;
-        const local = localDocs();
-        if(snap.empty && Object.keys(local).length){ S.localCopy = local; setBadge(); }
-        setTimeout(freezeExisting, 0);
-      }
       renderAll();
     }, denied));
   });
 }
 async function initStore(){
   if(FIREBASE_CONFIG.apiKey && window.firebase){ initFirebase(); return; }
-  const C = window.claude;
-  let db = null, user = null, uid = null;
-  try{
-    if(C && C.use){
-      [db, user] = await Promise.all([C.use("db"), C.use("user")]);
-      if(db && user) uid = await user.id();
-    }
-  }catch(e){ db = null; }
-  if(db && uid){
-    try{
-      col = db.collection("data/users/" + uid);
-      S.mode = "cloud"; setBadge();
-      S.houseDb = db.doc("house/costs");
-      S.houseDb.onSnapshot(d => { S.house = d.exists ? structuredClone(d.data()) : null; renderAll(); }, () => {});
-      col.onSnapshot(snap => {
-        const m = {};
-        snap.docs.forEach(d => { if(d.exists) m[d.id] = structuredClone(d.data()); });
-        S.docs = m; S.loaded = true; renderAll(); freezeExisting();
-      }, () => { toast("Lost the connection to your saved data. Reload the page to reconnect."); });
-      return;
-    }catch(e){}
-  }
   S.mode = "local";
   try{ const raw = localStorage.getItem(LS_KEY); if(raw) S.docs = JSON.parse(raw) || {}; }catch(e){}
-  S.loaded = true; setBadge(); renderAll(); freezeExisting();
+  S.loaded = true; setBadge(); renderAll();
 }
-async function initClaude(){
-  const C = window.claude; if(!C || !C.use) return;
-  try{ S.sample = await C.use("sample"); }catch(e){}
-  try{ S.downloads = await C.use("downloads"); }catch(e){}
-  try{ S.mcp = await C.use("mcp"); if(S.mcp) renderImports(); }catch(e){}
-  if(S.sample){
-    try{ const lim = await S.sample.limits(); S.imgLimits = lim.images || null; }catch(e){}
-    $("#claudeCatBtn").hidden = false;
-    $("#invReadBtn").hidden = false;
-    if(S.imgLimits){ $("#imgHint").hidden = false; $("#fileIn").accept += ",image/*"; }
-    renderStages();
-  }
-}
-
 /* ---------- example data ---------- */
 function exampleDocs(){
   const now = new Date(); const cur = ymd(now.getFullYear(), now.getMonth()+1, 1).slice(0,7);
@@ -1389,7 +1323,7 @@ function renderRegister(list){
       <span class="a ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)}${drcr(t.a)}</span>
       <button class="x" aria-label="Delete this transaction" ${ro(t)?"disabled":""}>×</button>
     </div>`;
-  $("#reg").innerHTML = (unrec ? `<p class="inc-note" style="margin:0 0 6px">${unrec} ${unrec===1?"transaction has":"transactions have"} a dashed orange category: Spendbook didn’t recognise the merchant and put ${unrec===1?"it":"them"} in Misc. Pick the right category, or use “Ask Claude to sort unrecognised” in Settings.</p>` : "")
+  $("#reg").innerHTML = (unrec ? `<p class="inc-note" style="margin:0 0 6px">${unrec} ${unrec===1?"transaction has":"transactions have"} a dashed orange category: Spendbook didn’t recognise the merchant and put ${unrec===1?"it":"them"} in Misc. Pick the right category.</p>` : "")
     + `<div class="reg-row head"><span><input type="checkbox" id="selAll" aria-label="Select all shown" ${allOn?"checked":""} ${S.shownKeys.length?"":"disabled"}></span><span><button type="button" data-sort="date" class="${sk==="date"?"on":""}" aria-label="Sort by date">Date ${arrow("date")}</button></span><span>Description</span><span>Category</span><span style="text-align:right"><button type="button" data-sort="amt" class="${sk==="amt"?"on":""}" aria-label="Sort by amount">Amount ${arrow("amt")}</button></span><span></span></div>` +
     (S.catFilter === "__repeat" ? repeatGroupsHtml(rows, rowHtml, base.filter(t => t.rep && !t.repOpen).length)
       : !shown.length ? `<p class="empty">No transactions match.</p>`
@@ -1400,7 +1334,7 @@ function renderRegister(list){
 }
 function houseBlock(){
   const hr = houseRows(), h = S.house;
-  const canRead = (S.mcp || S.fbUser) && S.houseDb;
+  const canRead = S.fbUser && S.houseDb;
   const btn = canRead ? `<button class="btn small" id="houseRefresh" ${S.houseBusy?"disabled":""}>${S.houseBusy?'<span class="spin"></span> Reading…':(hr.length?"Refresh from sheet":"Read the sheet")}</button>` : "";
   const hs = houseSheet();
   if(!hr.length) return !canRead ? "" : !hs ? `<div class="imp"><div style="min-width:0"><div class="t">House cost sheet</div><small>Add your house cost sheet under Settings to read it.</small></div></div>`
@@ -1647,6 +1581,7 @@ $("#currency").onchange = e => saveSettings({currency:e.target.value});
 /* app versions, newest first: major.minor.patch
    major = a change in how the app works or stores data, minor = new features, patch = fixes and small tweaks */
 const REVISIONS = [
+  {v:"2.13.2", date:"19 Nov 2026", items:["Removed Claude-only features the hosted app never used","Removed finished one-time data migrations"]},
   {v:"2.13.1", date:"19 Nov 2026", items:["Monthly chart shows the total on every bar","Dashed monthly-average line when one category is shown"]},
   {v:"2.13.0", date:"19 Nov 2026", items:["Compare months: spend per category in two months, side by side","Admin can change a transaction's description","Count a transaction in a different month (e.g. a bill paid in October for September)"]},
   {v:"2.12.0", date:"15 Oct 2026", items:["Admin menu: add, rename and delete categories","Change history moved here, 10 entries at a time","Revision list and revision number at the bottom of the page"]},
@@ -1918,44 +1853,8 @@ $("#invHist").addEventListener("click", e => {
   const [gone] = doc.values.splice(i,1); putDoc("investments", doc);
   toast("Value deleted.", () => { const d2 = structuredClone(invDoc()); d2.values.push(gone); putDoc("investments", d2); }, "Undo");
 });
-async function fileText(file){
-  if(/\.pdf$/i.test(file.name)){
-    if(!window.pdfjsLib) throw new Error("pdf");
-    const pdf = await pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer()), isEvalSupported:false}).promise;
-    let out = "";
-    for(let p=1;p<=Math.min(pdf.numPages,12);p++){ const tc = await (await pdf.getPage(p)).getTextContent(); out += tc.items.map(it=>it.str).join(" ") + "\n\n"; }
-    return out;
-  }
-  return await file.text();
-}
-$("#invReadBtn").onclick = () => $("#invFile").click();
-$("#invFile").onchange = async e => {
-  const file = e.target.files[0]; e.target.value = ""; if(!file || !S.sample) return;
-  const btn = $("#invReadBtn"); btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Claude is reading…`;
-  try{
-    const text = (await fileText(file)).slice(0, 60000);
-    const r = await S.sample.json(`This is a brokerage or retirement account statement. Reply with only a JSON object: {"account": the brokerage name such as "Robinhood", "Schwab" or "Fidelity", "asOf": "YYYY-MM-DD" (the statement's ending date), "value": number (total ending account value, including cash)}. If you can't find the ending value, use null for value.\n\n---\n${text}`, {modelTier:"default"});
-    if(!r || typeof r.value !== "number"){ toast("Claude couldn’t find the account value in that file. Enter it by hand."); return; }
-    const opts = [...$("#invAcct").options].map(o=>o.value);
-    const name = String(r.account||"").trim(), match = opts.find(o => o.toLowerCase() === name.toLowerCase() || (name && o.toLowerCase().includes(name.toLowerCase())));
-    if(match){ $("#invAcct").value = match; $("#invOtherWrap").hidden = true; } else if(name){ $("#invAcct").value = "__other"; $("#invOtherWrap").hidden = false; $("#invOther").value = name; }
-    if(/^\d{4}-\d{2}-\d{2}$/.test(r.asOf||"")) $("#invDate").value = r.asOf;
-    $("#invVal").value = r.value;
-    toast("Claude filled in the value. Check it, then Save value.");
-  }catch(err){
-    const c = err && err.code;
-    toast(c==="not_granted"||c==="sampling_disabled" ? "Claude isn’t available for this page." : err && err.name==="PasswordException" ? "That PDF is password-protected. Enter the value by hand." : "Couldn’t read that statement. Enter the value by hand.");
-  }finally{ btn.disabled = false; btn.textContent = "Read a brokerage statement"; }
-};
 
 /* ---------- House cost sheet ---------- */
-function parseHouseSheet(text, tab){
-  const start = text.indexOf("### Sheet Name: " + tab);
-  if(start < 0) throw new Error(`Couldn’t find a tab named “${tab}” in the sheet.`);
-  const sect = text.slice(start + 5).split("\n### Sheet Name: ")[0];
-  const lines = sect.split("\n").map(l=>l.trim()).filter(l => l.startsWith("|"));
-  return parseHouseCells(lines.map(l => l.replace(/^\|/,"").replace(/\|$/,"").split(/(?<!\\)\|/).map(c => c.trim().replace(/\\(.)/g,"$1"))));
-}
 function parseHouseCells(cells){
   cells = cells.map(r => r.map(c => String(c ?? "").trim()));
   const hi = cells.findIndex(r => r.some(c=>/^description$/i.test(c)) && r.some(c=>/^cost$/i.test(c)));
@@ -1999,28 +1898,22 @@ async function readHouseWithSheetsApi(hs, retried){
   }
   return parseHouseCells((await r.json()).values || []);
 }
-async function readHouseWithMcp(hs){
-  const r = await S.mcp.callTool("Google Drive", "read_file_content", {fileId: hs.id}, {cache:false});
-  const p = r.payload;
-  const text = (p && typeof p === "object" && p.fileContent) || (typeof p === "string" ? p : (r.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n"));
-  return parseHouseSheet(String(text||""), hs.tab);
-}
 /* the sheet ID lives in shared settings, so another member could change it; your Google account only
    reads a sheet you've approved on this device */
 const SHEET_OK = "spendbook-sheets-ok";
 function approvedSheets(){ try{ return JSON.parse(localStorage.getItem(SHEET_OK) || "[]"); }catch(e){ return []; } }
 function approveSheet(id){ try{ const a = approvedSheets(); if(!a.includes(id)) localStorage.setItem(SHEET_OK, JSON.stringify(a.concat(id).slice(-20))); }catch(e){} }
 async function refreshHouse(){
-  if(!(S.mcp || S.fbUser) || !S.houseDb || S.houseBusy) return;
+  if(!S.fbUser || !S.houseDb || S.houseBusy) return;
   const hs = houseSheet(); if(!hs){ toast("Add your house cost sheet in Settings first."); return; }
-  if(S.fbUser && !approvedSheets().includes(hs.id)){
+  if(!approvedSheets().includes(hs.id)){
     const who = hs.by && hs.by !== S.fbUser.email ? ` (set by ${hs.by})` : "";
     if(!window.confirm(`Read the house cost sheet with your Google account?\n\nSheet ID: ${hs.id}${who}\nTab: ${hs.tab}\n\nOnly continue if this is your house cost sheet.`)) return;
     approveSheet(hs.id);
   }
   S.houseBusy = true; renderImports();
   try{
-    const parsed = S.fbUser ? await readHouseWithSheetsApi(hs) : await readHouseWithMcp(hs);
+    const parsed = await readHouseWithSheetsApi(hs);
     await S.houseDb.set({sheetId:hs.id, tab:hs.tab, readAt:new Date().toISOString(), ...parsed});
     logChange(`Read ${parsed.rows.length} house costs from the house sheet`);
     toast(`Read ${parsed.rows.length} house costs from the sheet.`);
@@ -2029,9 +1922,6 @@ async function refreshHouse(){
     toast(c==="auth/popup-closed-by-user" || c==="auth/cancelled-popup-request" ? "Sheet not read: the Google window was closed."
       : c==="auth/popup-blocked" ? "Allow pop-ups for this site so Google can ask to read the sheet."
       : c==="auth/user-mismatch" ? `Choose ${S.fbUser.email} in the Google window, the account you’re signed in with.`
-      : c==="server_not_connected" ? "Connect Google Drive in claude.ai Settings → Connectors, then try again."
-      : c==="needs_reauth" ? "Reconnect Google Drive in claude.ai Settings → Connectors, then try again."
-      : c==="not_granted" || c==="cancelled" ? "Spendbook needs permission to read the sheet from Google Drive."
       : c==="permission-denied" ? "Read the sheet, but Firestore refused to save it. Check your Firestore rules allow books/shared/meta."
       : (e && e.message && !c) ? e.message
       : `Couldn’t read the sheet (${[c, e && e.message].filter(Boolean).join(": ") || "unknown error"}).`);
@@ -2043,44 +1933,11 @@ $("#imports").addEventListener("click", e => {
 });
 
 /* ---------- export ---------- */
-$("#exportBtn").onclick = async () => {
+$("#exportBtn").onclick = () => {
   const rows = [["Date","Description","Account","Category","Amount","Direction"]].concat(TX.map(t=>[t.d,t.s,t.acct,t.cat,Math.abs(t.a).toFixed(2),t.a<0?"Credit":"Debit"]));
   const csv = rows.map(r => r.map(v => /[",\n]/.test(v) ? `"${String(v).replace(/"/g,'""')}"` : v).join(",")).join("\n");
   const name = `spendbook-${new Date().toISOString().slice(0,10)}.csv`;
-  if(S.downloads){
-    try{ await S.downloads.save({filename:name, data:csv}); toast("Export saved."); }
-    catch(e){ if(e && e.code !== "declined") toast("Couldn’t save the file here."); }
-  } else {
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download = name; a.click();
-  }
-};
-
-/* ---------- Claude: sort Other ---------- */
-$("#claudeCatBtn").onclick = async () => {
-  const btn = $("#claudeCatBtn");
-  const others = TX.filter(t => isUnsorted(t) && t.imp!=="example");
-  const map = {}; for(const t of others){ const k = merchantKey(t.s).split(" ")[0]; if(k.length>=3 && !map[k]) map[k] = t.s; }
-  const keys = Object.keys(map).slice(0,150);
-  if(!keys.length){ toast("Every transaction already has a category."); return; }
-  btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Claude is sorting ${keys.length} merchants…`;
-  try{
-    const cats = CAT_NAMES;
-    const res = await S.sample.json(
-      `You categorise personal-finance transactions. For each merchant keyword below (shown with one sample bank-statement description), choose the single best category from this list: ${cats.join(", ")}. House = mortgage, rent, HOA, property tax, home repairs. Gas + Costco = fuel stations and Costco. Travel = flights, hotels, car rentals, rideshare, parking, tolls. Dining Out + Entertainment = restaurants, coffee, food delivery, bars, streaming, movies, events. Utilities = electricity, water, gas bill, trash, internet, phone. Misc. = shopping, insurance, car loans, health and anything else. Transfers = moving money between the person's own accounts or paying a credit card bill. Reply "?" for a keyword you genuinely can't place, such as a payment to a person's name.\nReply with only a JSON object mapping each keyword exactly as given to a category name, e.g. {"CHIPOTLE":"Dining Out + Entertainment"}.\n\n` +
-      keys.map(k => `${k} :: ${map[k].slice(0,90)}`).join("\n"), {modelTier:"quick"});
-    const rules = settings().rules.slice(); let n = 0;
-    for(const [k,c] of Object.entries(res||{})){
-      if(!CAT_NAMES.includes(c) || c==="Misc.") continue;
-      const m = String(k).toLowerCase(); if(m.length<3 || rules.some(r=>r.m===m)) continue;
-      rules.push({m, c}); n++;
-    }
-    if(n){ await saveSettings({rules}); toast(`Claude added ${n} rules. You can remove any of them in Settings.`); }
-    else toast("Claude couldn’t place any of them confidently.");
-  }catch(e){
-    if(e && (e.code==="not_granted"||e.code==="sampling_disabled")) { btn.hidden = true; toast("Claude isn’t available for this page."); }
-    else if(e && e.code==="rate_limited") toast("Claude is busy right now. Try again in a minute.");
-    else if(e && e.code!=="cancelled") toast("Claude couldn’t finish that. Try again.");
-  }finally{ btn.disabled = false; btn.textContent = "Ask Claude to sort unrecognised"; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download = name; a.click();
 };
 
 /* ---------- overlays ---------- */
@@ -2103,11 +1960,10 @@ async function handleFiles(files){
   for(const file of files){
     const st = {id:rid(), file, name:file.name, account:guessCard(file.name), other:false, status:"Reading…", statusKind:"", txns:[], signMode:"auto", method:""};
     const ext = file.name.split(".").pop().toLowerCase();
-    st.kind = ext==="pdf" ? "pdf" : /^(xlsx?|xlsm|ods)$/.test(ext) ? "sheet" : file.type.startsWith("image/") ? "image" : "csv";
+    st.kind = ext==="pdf" ? "pdf" : /^(xlsx?|xlsm|ods)$/.test(ext) ? "sheet" : "csv";
     S.stages.push(st); renderStages();
     try{
       if(st.kind==="pdf") await readPdf(st);
-      else if(st.kind==="image") { st.status = S.sample ? "Photos and screenshots are read by Claude." : "Photos can only be read when Claude is available on this page."; st.statusKind = S.sample?"":"err"; }
       else await readTable(st);
     }catch(e){ st.status = "Couldn’t read this file. " + (e && e.message ? e.message : ""); st.statusKind = "err"; }
     renderStages();
@@ -2234,7 +2090,7 @@ function buildTable(st){
   finishStage(st);
 }
 function finishStage(st){
-  if(!st.txns.length){ st.status = st.kind==="pdf" ? "Couldn’t find transactions in this PDF’s layout." + (S.sample?" Try having Claude read it.":"") : "No transactions found. Check the column choices below."; st.statusKind = "warn"; }
+  if(!st.txns.length){ st.status = st.kind==="pdf" ? "Couldn’t find transactions in this PDF’s layout. Export a CSV from your bank instead." : "No transactions found. Check the column choices below."; st.statusKind = "warn"; }
   else { const ds = st.txns.map(t=>t.d).sort(); st.status = `Found ${st.txns.length} transactions, ${shortDate(ds[0])} – ${shortDate(ds[ds.length-1])}`; st.statusKind = "ok"; }
 }
 /* already imported = same card, date, amount and description; the same charge on another card is kept */
@@ -2266,7 +2122,7 @@ async function readPdf(st, password){
     pages.push(lines.map(l => { l.items.sort((a,b)=>a.x-b.x); let out = "", endX = null; for(const it of l.items){ if(endX!==null) out += (it.x - endX > 12 ? "   " : (it.x - endX > 1 ? " " : "")); out += it.s; endX = it.x + it.w; } return out.trim(); }).join("\n"));
   }
   st.text = pages; st.status = "";
-  if(!pages.join("").trim()){ st.txns = []; st.status = "This PDF has no readable text (it may be a scan)." + (S.sample ? " Claude can’t read scanned PDFs here; export a CSV from your bank instead." : ""); st.statusKind = "warn"; return; }
+  if(!pages.join("").trim()){ st.txns = []; st.status = "This PDF has no readable text (it may be a scan). Export a CSV from your bank instead."; st.statusKind = "warn"; return; }
   parsePdfText(st);
 }
 const DATE_START = /^(\d{4}-\d{2}-\d{2}|\d{1,2}[-\/.]\d{1,2}[-\/.]\d{2,4}|\d{1,2}(?:st|nd|rd|th)?[\s\-\/]*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?(?:[\s\-\/,']*\d{4}|[\s\-\/']\d{2}(?!\d))?|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?[\s\-\/]*\d{1,2}(?:st|nd|rd|th)?(?:,?[\s\-\/]*\d{4})?)(?=\s|$)/i;
@@ -2314,43 +2170,6 @@ function parsePdfText(st){
   finishStage(st);
 }
 
-/* Claude reads a statement */
-async function claudeRead(st){
-  st.busy = true; st.status = "Claude is reading the statement…"; st.statusKind = ""; renderStages();
-  const ask = (body, images) => S.sample.json(
-    `Extract every individual transaction from this ${images?"image of a bank/credit-card statement or a receipt":"bank or credit-card statement text"}.\n` +
-    `Reply with only a JSON array. Each item: {"date":"YYYY-MM-DD","description":string,"amount":number,"direction":"debit"|"credit"}.\n` +
-    `amount is always positive. debit = money leaving the account or a charge on a card. credit = money received, refunds, cashback, or a payment made towards a card bill.\n` +
-    `Skip opening/closing balances, totals, summaries, reward points and rate tables. For a receipt, return one item with the total paid and the store name as description.\n` +
-    `Statement dates are probably ${settings().dateOrder==="mdy"?"month-first":"day-first"} unless the text makes it clear. Use the statement period to fill in missing years. If there are no transactions, reply [].` +
-    (body ? `\n\n---\n${body}` : ""), images ? {images, modelTier:"default"} : {modelTier:"default"});
-  try{
-    let items = [];
-    if(st.kind === "image"){ items = await ask("", [st.file]); }
-    else {
-      const chunks = []; let cur = "";
-      for(const pg of st.text){ if((cur + pg).length > 45000 && cur){ chunks.push(cur); cur = ""; } cur += pg.slice(0, 60000) + "\n\n"; }
-      if(cur.trim()) chunks.push(cur);
-      for(let i=0;i<chunks.length;i++){
-        if(chunks.length>1){ st.status = `Claude is reading part ${i+1} of ${chunks.length}…`; renderStages(); }
-        const r = await ask(chunks[i]); if(Array.isArray(r)) items = items.concat(r);
-      }
-    }
-    const out = [];
-    for(const it of (Array.isArray(items)?items:[])){
-      const d = parseDate(it.date, "dmy"); const v = Math.abs(Number(it.amount));
-      if(!d || !isFinite(v) || !v) continue;
-      out.push({id:rid(), d, s:String(it.description||"(no description)").slice(0,200), a: it.direction==="credit" ? -v : v});
-    }
-    st.txns = out; st.method = "claude"; st.needsSign = false; finishStage(st);
-    if(out.length) st.status += " · read by Claude, check a few rows before importing";
-  }catch(e){
-    const c = e && e.code;
-    st.status = c==="not_granted"||c==="sampling_disabled" ? "Claude isn’t available for this page." : c==="rate_limited" ? "Claude is busy. Try again in a minute." : c==="prompt_too_large" ? "This statement is too long for one read. Split the PDF and try again." : c==="image_rejected" ? "Claude couldn’t use that image. Try a clearer photo (JPEG or PNG)." : "Claude couldn’t read it. Try again.";
-    st.statusKind = "err";
-  }finally{ st.busy = false; renderStages(); }
-}
-
 /* staging UI */
 function renderStages(){
   const box = $("#stages");
@@ -2366,12 +2185,11 @@ function renderStages(){
     const signUI = st.txns.length && !st.imported ? `<div class="field"><span>In this file, negative amounts (−) are <b style="color:var(--danger)">*</b></span>
       <div class="row"><span class="seg" data-sign><button type="button" data-v="posIsSpend" class="${st.signMode==="posIsSpend"?"on":""}">Credits (money in)</button><button type="button" data-v="negIsSpend" class="${st.signMode==="negIsSpend"?"on":""}">Debits (money out)</button></span>
       ${needsAnswer(st) ? `<span class="need">Required before importing.${st.needsSign ? ` Best guess: ${st.resolvedSign==="negIsSpend"?"debits":"credits"}.` : ""}</span>` : ""}</div>
-      ${st.needsSign ? "" : `<small class="muted">This file marks money in and out separately${st.method==="claude" ? " (read by Claude)" : ""}, so your answer won’t change these rows. Check the Db/Cr column in the preview.</small>`}</div>` : "";
+      ${st.needsSign ? "" : `<small class="muted">This file marks money in and out separately, so your answer won’t change these rows. Check the Db/Cr column in the preview.</small>`}</div>` : "";
     const prev = st.txns.length ? `<div class="preview"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>
       ${st.txns.slice(0,8).map(t=>`<tr><td>${shortDate(t.d)}</td><td>${esc(t.s.slice(0,60))}</td><td>${esc(effCat(t))}</td><td class="n ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)} ${drcr(t.a)}</td></tr>`).join("")}
       </tbody></table></div>${st.txns.length>8?`<span class="muted" style="font-size:.82rem">…and ${st.txns.length-8} more</span>`:""}` : "";
     const dups = st.txns.length && st.account.trim() && !st.imported ? st.txns.length - freshTxns(st).length : 0;
-    const canClaude = S.sample && !st.busy && ((st.kind==="pdf" && st.text) || (st.kind==="image" && S.imgLimits));
     return `<div class="stage" data-st="${st.id}">
       <div class="stage-head"><span class="fn">${esc(st.name)}</span>${st.imported?`<span class="status ok">Imported ✓</span>`:`<button class="btn small ghost" data-rm>Remove</button>`}</div>
       ${st.imported ? "" : `
@@ -2384,7 +2202,6 @@ function renderStages(){
       <div class="status ${st.statusKind}">${st.busy?'<span class="spin"></span> ':""}${esc(st.status)}${dups?` · ${dups} already imported for this card (will be skipped)`:""}</div>
       ${mapUI}${signUI}${prev}
       <div class="row">
-        ${canClaude ? `<button class="btn small" data-claude>${st.kind==="image"?"Read with Claude":st.method==="claude"?"Read again with Claude":"Have Claude read it instead"}</button>` : ""}
         ${st.txns.length ? `<button class="btn small primary" data-import ${canImport(st)?"":"disabled"}>Import ${st.txns.length - dups} transactions</button>` : ""}
       </div>`}
     </div>`;
@@ -2404,7 +2221,6 @@ $("#stages").addEventListener("click", e => {
   if(cb){ if(cb.dataset.card==="__other"){ st.other = true; if(cardList().includes(st.account)) st.account = ""; } else { st.other = false; st.account = cb.dataset.card; } renderStages(); if(st.other) document.querySelector(`[data-st="${st.id}"] [data-acct]`)?.focus(); return; }
   if(e.target.closest("[data-rm]")){ S.stages = S.stages.filter(s=>s!==st); renderStages(); }
   const sb = e.target.closest("[data-sign] button"); if(sb){ st.signMode = sb.dataset.v; if(st.method==="pdf") parsePdfText(st); else if(st.method==="table") buildTable(st); renderStages(); }
-  if(e.target.closest("[data-claude]")) claudeRead(st);
   if(e.target.closest("[data-import]")) importStage(st);
 });
 $("#importAll").onclick = () => {
@@ -2468,6 +2284,5 @@ if("IntersectionObserver" in window){
 /* ---------- boot ---------- */
 renderAll();
 initStore();
-initClaude();
 })();
 </script>

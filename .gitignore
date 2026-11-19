@@ -14,3 +14,7 @@ node_modules/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Archify check receipts (contain local paths)
+.archify/*/*.json
+!.archify/*/candidate.json
