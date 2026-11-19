@@ -324,6 +324,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
   <a href="#catPanel">Overall spend</a>
   <a href="#trendPanel">Monthly spend</a>
   <a href="#merchPanel">Top merchants</a>
+  <a href="#comparePanel">Compare months</a>
   <a href="#topsPanel">Biggest costs</a>
   <a href="#recPanel">Recurring charges</a>
   <a href="#invPanel">Investments</a>
@@ -378,6 +379,11 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
     </div>
   </div>
 
+  <section class="panel" id="comparePanel">
+    <div class="panel-head"><h2>Compare months</h2>
+      <span class="row"><select id="cmpA" aria-label="First month"></select><span class="muted">vs</span><select id="cmpB" aria-label="Second month"></select></span></div>
+    <div class="inv-table" id="cmpTable"></div>
+  </section>
   <section class="panel" id="topsPanel">
     <div class="panel-head"><h2>Biggest costs in each category</h2><span class="muted" id="topNote" style="font-size:.85rem"></span></div>
     <div class="tops" id="tops"></div>
@@ -428,6 +434,8 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
       <label>Set category <select id="bulkCat" aria-label="New category for selected transactions"></select></label>
       <label><input type="checkbox" id="bulkRule"> Also do this for these merchants in future</label>
       <button class="btn small" id="bulkApply" type="button">Apply</button>
+      <label>Count in <input type="month" id="bulkMonth" aria-label="Month the selected transactions count in"></label>
+      <button class="btn small" id="bulkMonthApply" type="button" title="Leave the month empty to go back to each transaction's own month">Set month</button>
       <button class="btn small ghost" id="bulkClear" type="button">Clear selection</button>
     </div>
     <div class="foot"><span class="muted" id="regFoot"></span><button class="btn small" id="moreBtn" hidden>Show more</button></div>
@@ -836,7 +844,7 @@ function renderUndo(){
 const nTx = n => `${n} transaction${n===1?"":"s"}`;
 const tLabel = t => `${String(t.s).slice(0,40)} (${money(Math.abs(t.a),true)}, ${shortDate(t.d)})`;
 function describeChanges(changes){
-  const parts = [], moved = {}, accts = {}, deleted = [], restored = [];
+  const parts = [], moved = {}, accts = {}, deleted = [], restored = [], monthMoves = {};
   for(const {id, before, after} of changes){
     if(id === "settings"){
       const b = before || {}, a = after || {}, n0 = parts.length;
@@ -877,6 +885,8 @@ function describeChanges(changes){
     for(const [k, t] of aT){
       const o = bT.get(k); if(!o){ restored.push(t); continue; }
       if(o.c !== t.c){ const to = effCat(t); (moved[to] = moved[to] || []).push({t, from: effCat(o)}); }
+      if(o.desc !== t.desc) parts.push(t.desc ? `Renamed ${tLabel(o)} to “${t.desc}”` : `Put back the statement description of ${tLabel(t)}`);
+      if(o.m !== t.m){ const to = t.m || ""; (monthMoves[to] = monthMoves[to] || []).push(t); }
       if(o.ia !== t.ia){ const to = t.ia || ""; (accts[to] = accts[to] || []).push(t); }
     }
   }
@@ -885,6 +895,8 @@ function describeChanges(changes){
   for(const [to, list] of Object.entries(accts))
     parts.push(to ? (list.length === 1 ? `Set investment account of ${tLabel(list[0])} to ${to}` : `Assigned ${list.length} investments to ${to}`)
                   : (list.length === 1 ? `Cleared investment account of ${tLabel(list[0])}` : `Cleared the investment account of ${list.length} transactions`));
+  for(const [to, list] of Object.entries(monthMoves))
+    parts.push(to ? `Counted ${list.length === 1 ? tLabel(list[0]) : `${list.length} transactions`} in ${monthLabel(to)}` : `Put ${list.length === 1 ? tLabel(list[0]) : `${list.length} transactions`} back in ${list.length === 1 ? "its" : "their"} own month`);
   if(deleted.length) parts.push(deleted.length === 1 ? `Deleted ${tLabel(deleted[0])}` : `Deleted ${deleted.length} transactions`);
   if(restored.length) parts.push(restored.length === 1 ? `Added ${tLabel(restored[0])}` : `Added back ${restored.length} transactions`);
   return parts.join("; ") || "Edited transactions";
@@ -1043,6 +1055,7 @@ const importDocs = () => Object.entries(S.docs).filter(([k,v]) => v && v.kind ==
 /* data written to the shared book is checked on the way in: dates must be YYYY-MM-DD and amounts numbers,
    so nothing stored outside the app can reach the page as markup */
 const isYmd = d => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+const isYm = m => typeof m === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
 const validTxn = t => t && isYmd(t.d) && typeof t.a === "number" && isFinite(t.a) && typeof t.s === "string";
 const houseRows = () => (S.house && Array.isArray(S.house.rows)) ? S.house.rows.filter(validTxn) : [];
 const isExample = () => !houseRows().length && importDocs().every(d => !(d.txns||[]).length);
@@ -1126,7 +1139,9 @@ function allTxns(){
       const m = t.a >= 50 ? bestHouseMatch(t, payments) : null;
       if(m || cat === "House") hm = m || {p:null, exact:false};
     }
-    out.push({...t, acct: t.acct || doc.account || "Unnamed account", src: doc.name, imp: doc.id, cat, hint: !!hm, hm});
+    /* s = description shown (admin may rename it; so keeps the statement's own); pm = month it counts in */
+    const shown = typeof t.desc === "string" && t.desc.trim() ? t.desc.trim() : t.s;
+    out.push({...t, s: shown, so: t.s, pm: isYm(t.m) ? t.m : t.d.slice(0,7), acct: t.acct || doc.account || "Unnamed account", src: doc.name, imp: doc.id, cat, hint: !!hm, hm});
   }
   out.sort((a,b) => a.d < b.d ? 1 : a.d > b.d ? -1 : 0);
   flagRepeats(out);
@@ -1147,12 +1162,31 @@ function periodName(){
   if(ms.length <= 3) return ms.map(m => monthLabel(m)).join(", ");
   return `${ms.length} months (${monthLabel(ms[0])} – ${monthLabel(ms[ms.length-1])})`;
 }
-function monthsOf(list){ return [...new Set(list.map(t=>t.d.slice(0,7)))].sort().reverse(); }
+/* spend per category in two months, side by side */
+function renderCompare(list, months){
+  if(!months.length){ $("#cmpTable").innerHTML = `<p class="empty">Import a statement to compare months.</p>`; return; }
+  if(!months.includes(S.cmpB)) S.cmpB = months[0];
+  if(!months.includes(S.cmpA)) S.cmpA = months[1] || months[0];
+  const opts = sel => months.map(m => `<option value="${m}" ${m===sel?"selected":""}>${monthLabel(m)}</option>`).join("");
+  $("#cmpA").innerHTML = opts(S.cmpA); $("#cmpB").innerHTML = opts(S.cmpB);
+  const sum = m => { const by = {}; for(const t of list){ if(t.pm !== m || CAT_KIND[t.cat] !== "spend") continue; by[t.cat] = (by[t.cat]||0) + t.a; } return by; };
+  const A = sum(S.cmpA), B = sum(S.cmpB);
+  const rows = SPEND_CATS.map(c => [c, A[c]||0, B[c]||0]).filter(([, a, b]) => Math.abs(a) > 0.005 || Math.abs(b) > 0.005);
+  const tA = rows.reduce((s,r)=>s+r[1],0), tB = rows.reduce((s,r)=>s+r[2],0);
+  const diff = (a, b) => { const d = b - a, cls = d > 0.005 ? "up" : d < -0.005 ? "down" : ""; const pct = Math.abs(a) > 0.005 ? ` (${d>0?"+":""}${Math.round(d/Math.abs(a)*100)}%)` : "";
+    return `<td class="${cls}" style="color:${cls==="up"?"var(--danger)":cls==="down"?"var(--accent)":"inherit"}">${d>0.005?"+":d<-0.005?"−":""}${money(Math.abs(d))}${pct}</td>`; };
+  $("#cmpTable").innerHTML = rows.length ? `<table><thead><tr><th>Category</th><th>${monthLabel(S.cmpA)}</th><th>${monthLabel(S.cmpB)}</th><th>Change</th></tr></thead><tbody>
+    ${rows.map(([c, a, b]) => `<tr><td><i class="sw" style="background:${CAT_COLOR[c]};margin-right:6px"></i>${esc(catLabel(c))}</td><td>${money(a)}</td><td>${money(b)}</td>${diff(a, b)}</tr>`).join("")}
+    <tr><td><b>Total spend</b></td><td><b>${money(tA)}</b></td><td><b>${money(tB)}</b></td>${diff(tA, tB)}</tr></tbody></table>`
+    : `<p class="empty">No spending in either month.</p>`;
+}
+function monthsOf(list){ return [...new Set(list.map(t=>t.pm || t.d.slice(0,7)))].sort().reverse(); }
 function inPeriod(t, period, latest){
   if(period === "all") return true;
-  if(period === "multi") return S.months.includes(t.d.slice(0,7));
-  if(period === "l12") return t.d.slice(0,7) > addMonths(latest,-12);
-  return t.d.startsWith(period);
+  const m = t.pm || t.d.slice(0,7);
+  if(period === "multi") return S.months.includes(m);
+  if(period === "l12") return m > addMonths(latest,-12);
+  return m === period;
 }
 
 /* ---------- render ---------- */
@@ -1182,6 +1216,7 @@ function renderAll(){
   renderKPIs(periodTx, acctTx);
   renderCats(periodTx);
   renderTrend(acctTx, S.period.length===7 ? S.period : S.period==="multi" ? S.months[S.months.length-1] : latest, S.period==="multi" ? new Set(S.months) : null);
+  renderCompare(acctTx, months);
   renderMerchants(periodTx);
   renderSources(periodTx);
   renderTop(periodTx);
@@ -1196,7 +1231,7 @@ function renderKPIs(list, acctTx){
   let delta = "";
   if(S.period.length === 7){
     const prev = addMonths(S.period,-1);
-    const pt = totals(acctTx.filter(x=>x.d.startsWith(prev)));
+    const pt = totals(acctTx.filter(x=>x.pm === prev));
     if(pt.spent > 0){
       const p = Math.round((t.spent - pt.spent)/pt.spent*100);
       delta = `<span class="delta ${p>0?"up":"down"}">${p>0?"▲":"▼"} ${Math.abs(p)}% vs ${monthLabel(prev).split(" ")[0]}</span>`;
@@ -1236,10 +1271,10 @@ function niceMax(v){ if(v<=0) return 1; const p = Math.pow(10, Math.floor(Math.l
 function compact(v){ const cur = settings().currency; return new Intl.NumberFormat(CURRENCIES[cur]||"en-IN",{notation:"compact",maximumFractionDigits:1}).format(v); }
 function renderTrend(list, anchor, picked){
   const months = []; for(let i=11;i>=0;i--) months.push(addMonths(anchor,-i));
-  const stacks = months.map(m => { const by = {}; for(const t of list){ if(!t.d.startsWith(m) || CAT_KIND[t.cat]!=="spend") continue; by[t.cat]=(by[t.cat]||0)+t.a; } return by; });
+  const stacks = months.map(m => { const by = {}; for(const t of list){ if(t.pm !== m || CAT_KIND[t.cat]!=="spend") continue; by[t.cat]=(by[t.cat]||0)+t.a; } return by; });
   const shown = SPEND_CATS.filter(c => !S.hiddenCats.has(c)), showInc = !S.hiddenCats.has("Income");
   const vals = stacks.map(by => shown.reduce((s,c)=>s+Math.max(0,by[c]||0),0));
-  const incs = months.map(m => showInc ? Math.max(0, list.filter(t=>t.d.startsWith(m) && t.cat==="Income").reduce((s,t)=>s-t.a,0)) : 0);
+  const incs = months.map(m => showInc ? Math.max(0, list.filter(t=>t.pm===m && t.cat==="Income").reduce((s,t)=>s-t.a,0)) : 0);
   const W=600,H=220,L=44,R=8,T=16,B=26, iw=W-L-R, ih=H-T-B;
   const mx = niceMax(Math.max(...vals, ...incs)); const bw = iw/12;
   let g = "";
@@ -1315,7 +1350,7 @@ function renderRegister(list){
   if(S.amtMin !== null) rows = rows.filter(t => Math.abs(t.a) >= S.amtMin);
   if(S.amtMax !== null) rows = rows.filter(t => Math.abs(t.a) <= S.amtMax);
   const q = S.search.trim().toLowerCase();
-  if(q) rows = rows.filter(t => t.s.toLowerCase().includes(q) || t.acct.toLowerCase().includes(q) || String(t.a).includes(q) || t.cat.toLowerCase().includes(q));
+  if(q) rows = rows.filter(t => t.s.toLowerCase().includes(q) || t.so.toLowerCase().includes(q) || t.acct.toLowerCase().includes(q) || String(t.a).includes(q) || t.cat.toLowerCase().includes(q));
   const [sk, sd] = S.regSort.split("-"), dir = sd === "asc" ? 1 : -1;
   rows = rows.slice().sort((a,b) => sk === "amt" ? (Math.abs(a.a) - Math.abs(b.a)) * dir || (a.d < b.d ? 1 : -1) : (a.d < b.d ? -1 : a.d > b.d ? 1 : 0) * dir || Math.abs(b.a) - Math.abs(a.a));
   $("#regSort").value = S.regSort;
@@ -1342,7 +1377,7 @@ function renderRegister(list){
     <div class="reg-row ${S.sel.has(keyOf(t))?"picked":""}" data-id="${esc(t.id)}" data-imp="${esc(t.imp)}">
       <span class="cb"><input type="checkbox" class="rsel" aria-label="Select" ${S.sel.has(keyOf(t))?"checked":""} ${ro(t)?"disabled":""}></span>
       <span class="d">${shortDate(t.d)}</span>
-      <span class="desc"><div title="${esc(t.s)}">${esc(t.s)}</div><small><span class="src">${esc(t.acct)}</span> ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.cat==="Investments" && !ro(t) ? ` · <span style="color:var(--c-inv)">${t.ia ? `Account: ${esc(t.ia)}` : "Account not set (see Investments)"}</span>${t.ia ? ` <button type="button" class="linkbtn" data-ia-clear>Change</button>` : ""}` : ""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.filter(r => S.showReviewed || !r.reviewed).map(r=>` · <span class="repnote ${r.reviewed?"done":""}" title="${esc(r.other.s)}">same amount ${r.other.a < 0 ? "in" : "out"} on ${shortDate(r.other.d)} (${esc(r.other.acct)})${r.reviewed?", marked not a duplicate":""}</span> ${r.reviewed ? `<button type="button" class="linkbtn" data-redup="${esc(r.pk)}">Undo</button>` : `<button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`}`).join(""):""}</small></span>
+      <span class="desc"><div title="${esc(t.so)}">${esc(t.s)}${t.s !== t.so ? ` <span class="muted" title="On the statement: ${esc(t.so)}">(renamed)</span>` : ""}${!ro(t) && isAdmin() ? ` <button type="button" class="linkbtn" data-desc-edit title="Change the description">Edit</button>` : ""}</div><small><span class="src">${esc(t.acct)}</span>${t.pm !== t.d.slice(0,7) ? ` · <span style="color:var(--accent)">counted in ${monthLabel(t.pm)}</span> <button type="button" class="linkbtn" data-pm-reset>Reset</button>` : ""} ${t.src && t.src!==t.acct ? `from ${esc(t.src)}` : ""}${t.n?` · ${esc(t.n)}`:""}${t.cat==="Investments" && !ro(t) ? ` · <span style="color:var(--c-inv)">${t.ia ? `Account: ${esc(t.ia)}` : "Account not set (see Investments)"}</span>${t.ia ? ` <button type="button" class="linkbtn" data-ia-clear>Change</button>` : ""}` : ""}${t.hm?` · <span style="color:var(--c-house)">${t.hm.p ? `${t.hm.exact?"Matches":"Close to"} house sheet: ${esc(t.hm.p.s)}, ${shortDate(t.hm.p.d)}, ${money(t.hm.p.a,true)}` : "Looks like a house cost; no matching sheet row"}</span> <button type="button" class="linkbtn" data-hm="same">Same payment: leave out</button> <button type="button" class="linkbtn" data-hm="keep">Different: keep</button>`:""}${t.rep?t.rep.filter(r => S.showReviewed || !r.reviewed).map(r=>` · <span class="repnote ${r.reviewed?"done":""}" title="${esc(r.other.s)}">same amount ${r.other.a < 0 ? "in" : "out"} on ${shortDate(r.other.d)} (${esc(r.other.acct)})${r.reviewed?", marked not a duplicate":""}</span> ${r.reviewed ? `<button type="button" class="linkbtn" data-redup="${esc(r.pk)}">Undo</button>` : `<button type="button" class="linkbtn" data-notdup="${esc(r.pk)}">Not a duplicate</button>`}`).join(""):""}</small></span>
       <span class="catc"><select aria-label="Category" class="${isUnsorted(t)&&!ro(t)?"other":""}" ${isUnsorted(t)&&!ro(t)?'title="Not recognised: pick the right category"':""} ${ro(t)?"disabled title=\"Edit this in the Google Sheet\"":""}>${catOptions(t.cat)}</select></span>
       <span class="a ${t.a<0?"cr":""}">${money(Math.abs(t.a),true)}${drcr(t.a)}</span>
       <button class="x" aria-label="Delete this transaction" ${ro(t)?"disabled":""}>×</button>
@@ -1487,8 +1522,38 @@ $("#bulkApply").onclick = () => {
     for(const [imp, us] of Object.entries(by)){ if(!S.docs[imp]) continue; const doc = structuredClone(S.docs[imp]); for(const u of us){ const t = doc.txns.find(x=>x.id===u.id); if(t){ if(u.c) t.c = u.c; else delete t.c; } } putDoc(imp, doc); }
   }, "Undo");
 };
+$("#bulkMonthApply").onclick = () => {
+  const m = $("#bulkMonth").value; if(m && !isYm(m)) return;
+  const byImp = {}; let n = 0;
+  for(const k of S.sel){ const i = k.indexOf("|"); (byImp[k.slice(0,i)] = byImp[k.slice(0,i)] || []).push(k.slice(i+1)); }
+  for(const [imp, ids] of Object.entries(byImp)){
+    if(!S.docs[imp]) continue;
+    const doc = structuredClone(S.docs[imp]), want = new Set(ids);
+    for(const t of doc.txns){ if(!want.has(t.id)) continue; if(m && m !== t.d.slice(0,7)) t.m = m; else delete t.m; n++; }
+    putDoc(imp, doc);
+  }
+  S.sel.clear(); $("#bulkMonth").value = ""; renderAll();
+  toast(m ? `${n} ${n===1?"transaction now counts":"transactions now count"} in ${monthLabel(m)}.` : `${n} ${n===1?"transaction is":"transactions are"} back in ${n===1?"its":"their"} own month.`);
+};
 $("#regSort").onchange = e => { S.regSort = e.target.value; renderAll(); };
+/* change one transaction field in its statement doc; null removes the field */
+function setTxnField(imp, id, key, val){
+  const f = findTxn(imp, id); if(!f) return;
+  const doc = structuredClone(f.doc), t = doc.txns[f.i];
+  if(val === null) delete t[key]; else t[key] = val;
+  putDoc(imp, doc);
+}
 $("#reg").addEventListener("click", e => {
+  const row = e.target.closest(".reg-row");
+  if(e.target.closest("[data-desc-edit]")){
+    const t = TX.find(x => x.imp === row.dataset.imp && x.id === row.dataset.id); if(!t) return;
+    const v = window.prompt(`Description (leave empty to go back to the statement's: “${t.so}”)`, t.s);
+    if(v === null) return;
+    const clean = v.trim().replace(/\s+/g, " ").slice(0, 200);
+    setTxnField(row.dataset.imp, row.dataset.id, "desc", clean && clean !== t.so ? clean : null);
+    return;
+  }
+  if(e.target.closest("[data-pm-reset]")){ setTxnField(row.dataset.imp, row.dataset.id, "m", null); return; }
   if(e.target.closest("[data-ia-clear]")){
     const row = e.target.closest(".reg-row"), f = findTxn(row.dataset.imp, row.dataset.id); if(!f) return;
     const doc = structuredClone(f.doc); delete doc.txns[f.i].ia; putDoc(row.dataset.imp, doc);
@@ -1519,6 +1584,8 @@ $("#reg").addEventListener("click", e => {
 });
 $("#regAcct").onchange = e => { S.regAcct = e.target.value; S.showN=150; renderAll(); };
 $("#catFilter").onchange = e => { S.catFilter = e.target.value; S.showN=150; renderAll(); };
+$("#cmpA").onchange = e => { S.cmpA = e.target.value; renderAll(); };
+$("#cmpB").onchange = e => { S.cmpB = e.target.value; renderAll(); };
 $("#period").onchange = e => { S.period = e.target.value; S.showN=150; renderAll(); };
 function openMonthPick(){
   const months = monthsOf(TX).slice().reverse(), chosen = new Set(S.period === "multi" ? S.months : S.period.length === 7 ? [S.period] : []);
@@ -1573,6 +1640,7 @@ $("#currency").onchange = e => saveSettings({currency:e.target.value});
 /* app versions, newest first: major.minor.patch
    major = a change in how the app works or stores data, minor = new features, patch = fixes and small tweaks */
 const REVISIONS = [
+  {v:"2.13.0", date:"19 Nov 2026", items:["Compare months: spend per category in two months, side by side","Admin can change a transaction's description","Count a transaction in a different month (e.g. a bill paid in October for September)"]},
   {v:"2.12.0", date:"15 Oct 2026", items:["Admin menu: add, rename and delete categories","Change history moved here, 10 entries at a time","Revision list and revision number at the bottom of the page"]},
   {v:"2.11.0", date:"15 Oct 2026", items:["Your own categories, changeable by one account only","Google Sheets refresh retries an expired token and shows the real error"]},
   {v:"2.10.0", date:"6 Oct 2026", items:["Side navigation for every section","Reviewed repeats hidden by default","Security hardening: data checks, script integrity, history rules, sheet confirmation"]},
@@ -2163,7 +2231,7 @@ function finishStage(st){
 }
 /* already imported = same card, date, amount and description; the same charge on another card is kept */
 const dupKey = (d,a,s,acct) => `${String(acct).trim().toLowerCase()}|${d}|${Math.round(a*100)}|${String(s).toLowerCase().replace(/[^a-z0-9]/g,"").slice(0,30)}`;
-const importedKeys = () => new Set(TX.filter(t=>t.imp!=="example").map(t => dupKey(t.d, t.a, t.s, t.acct)));
+const importedKeys = () => new Set(TX.filter(t=>t.imp!=="example").map(t => dupKey(t.d, t.a, t.so || t.s, t.acct)));
 function freshTxns(st){ const have = importedKeys(); return st.txns.filter(t => !have.has(dupKey(t.d, t.a, t.s, st.account))); }
 
 /* PDF */
