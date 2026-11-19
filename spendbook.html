@@ -1285,8 +1285,15 @@ function renderTrend(list, anchor, picked){
     for(const c of shown){ const v = Math.max(0, stacks[i][c]||0); if(!v) continue; const h = ih*v/mx; y -= h;
       g += `<rect x="${x}" y="${y}" width="${w}" height="${Math.max(h-0.8,0.6)}" fill="${CAT_COLOR[c]}" opacity="${sel?1:0.75}"><title>${monthLabel(m)} · ${esc(catLabel(c))}: ${money(v)}</title></rect>`; }
     g += `<text x="${x+w/2}" y="${H-8}" text-anchor="middle" style="${sel?"fill:var(--fg);font-weight:600":""}">${MON_T[+m.slice(5)-1]}</text>`;
-    if(sel && vals[i]>0) g += `<text x="${x+w/2}" y="${Math.max(10,T+ih-ih*vals[i]/mx-5)}" text-anchor="${i===11?"end":"middle"}" style="fill:var(--fg)">${compact(vals[i])}</text>`;
+    if(vals[i]>0) g += `<text x="${x+w/2}" y="${Math.max(10,T+ih-ih*vals[i]/mx-5)}" text-anchor="middle" style="fill:var(--fg)${sel?";font-weight:600":""}">${compact(vals[i])}</text>`;
   });
+  if(shown.length === 1){
+    const active = months.filter(m => list.some(t => t.pm === m));
+    const avg = active.length ? active.reduce((s,m) => s + vals[months.indexOf(m)], 0) / active.length : 0;
+    if(avg > 0){ const y = T + ih - ih*avg/mx;
+      g += `<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="${CAT_COLOR[shown[0]]}" stroke-width="1.5" stroke-dasharray="6 4"><title>${esc(catLabel(shown[0]))} average: ${money(avg)} a month over ${active.length} month${active.length===1?"":"s"}</title></line>`
+        + `<text x="${W-R}" y="${Math.max(10, y-4)}" text-anchor="end" style="fill:var(--fg);font-weight:600">avg ${compact(avg)}</text>`; }
+  }
   if(incs.some(v=>v>0)){
     const pts = incs.map((v,i) => [L + i*bw + bw/2, T+ih-ih*v/mx]);
     g += `<polyline points="${pts.map(p=>p.join(",")).join(" ")}" fill="none" stroke="var(--c-income)" stroke-width="2" stroke-linejoin="round"/>`;
@@ -1294,8 +1301,8 @@ function renderTrend(list, anchor, picked){
   }
   const label = shown.length === SPEND_CATS.length ? "all categories" : shown.length ? shown.join(", ") : "no categories";
   $("#trend").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Monthly spend for ${esc(label)}, 12 months to ${monthLabel(anchor)}">${g}</svg>`;
-  $("#trendNote").textContent = shown.length === SPEND_CATS.length ? "last 12 months · all categories" : `last 12 months · ${shown.length} of ${SPEND_CATS.length} categories`;
-  $("#legend").innerHTML = SPEND_CATS.map(c=>`<button type="button" data-tog="${esc(c)}" aria-pressed="${!S.hiddenCats.has(c)}"><i class="sw" style="background:${CAT_COLOR[c]}"></i>${esc(c)}</button>`).join("")
+  $("#trendNote").textContent = shown.length === SPEND_CATS.length ? "last 12 months · all categories" : shown.length === 1 ? `last 12 months · ${catLabel(shown[0])}, dashed line = monthly average` : `last 12 months · ${shown.length} of ${SPEND_CATS.length} categories`;
+  $("#legend").innerHTML = SPEND_CATS.map(c=>`<button type="button" data-tog="${esc(c)}" aria-pressed="${!S.hiddenCats.has(c)}"><i class="sw" style="background:${CAT_COLOR[c]}"></i>${esc(catLabel(c))}</button>`).join("")
     + `<button type="button" data-tog="Income" aria-pressed="${showInc}"><i class="sw" style="background:var(--c-income);height:3px;width:14px;border-radius:2px"></i>Income (line)</button>`
     + `<button type="button" class="lg-act" data-tog="__all">Show all</button><button type="button" class="lg-act" data-tog="__none">Hide all</button>`;
 }
@@ -1640,6 +1647,7 @@ $("#currency").onchange = e => saveSettings({currency:e.target.value});
 /* app versions, newest first: major.minor.patch
    major = a change in how the app works or stores data, minor = new features, patch = fixes and small tweaks */
 const REVISIONS = [
+  {v:"2.13.1", date:"19 Nov 2026", items:["Monthly chart shows the total on every bar","Dashed monthly-average line when one category is shown"]},
   {v:"2.13.0", date:"19 Nov 2026", items:["Compare months: spend per category in two months, side by side","Admin can change a transaction's description","Count a transaction in a different month (e.g. a bill paid in October for September)"]},
   {v:"2.12.0", date:"15 Oct 2026", items:["Admin menu: add, rename and delete categories","Change history moved here, 10 entries at a time","Revision list and revision number at the bottom of the page"]},
   {v:"2.11.0", date:"15 Oct 2026", items:["Your own categories, changeable by one account only","Google Sheets refresh retries an expired token and shows the real error"]},
