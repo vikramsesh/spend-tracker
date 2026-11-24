@@ -345,6 +345,7 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
         <div class="month-pick" id="monthPick" role="dialog" aria-label="Choose months" hidden></div></span>
       <select id="acctFilter" aria-label="Account"></select>
       <button class="btn" id="adminBtn" type="button" hidden>Admin</button>
+      <button class="btn" id="addBtn" type="button">+ Cash / Venmo</button>
       <button class="btn primary" id="uploadBtn">Upload statements</button>
       <button class="btn undo" id="undoBtn" type="button" hidden><span aria-hidden="true">↶</span> Undo<span class="undo-what" id="undoWhat"></span></button>
     </div>
@@ -527,6 +528,21 @@ details summary{cursor:pointer;font-weight:600;font-family:var(--f-display)}
 </div>
 
 <datalist id="acctList"></datalist>
+<div class="overlay" id="adder" hidden>
+  <form class="sheet narrow" id="addForm" role="dialog" aria-modal="true" aria-labelledby="addTitle">
+    <div class="sheet-head"><h2 id="addTitle">Add cash or Venmo</h2><button type="button" class="btn ghost" data-close="adder" aria-label="Close">✕</button></div>
+    <div class="seg" id="addDir"><button type="button" data-v="out" class="on">Money out (spent)</button><button type="button" data-v="in">Money in (received)</button></div>
+    <label class="field"><span>What for</span><input type="text" id="addDesc" required maxlength="200" placeholder="Farmers market, sold bike on Marketplace"></label>
+    <div class="settings-grid">
+      <label class="field"><span>Amount</span><input type="number" id="addAmt" step="0.01" min="0.01" required></label>
+      <label class="field"><span>Date</span><input type="date" id="addDate" required></label>
+      <label class="field"><span>Category</span><select id="addCat"></select></label>
+      <label class="field"><span>Paid or received with</span><input type="text" id="addAcct" list="payList" value="Cash" required></label>
+    </div>
+    <datalist id="payList"><option value="Cash"><option value="Venmo"><option value="Zelle"><option value="PayPal"></datalist>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close="adder">Cancel</button><button class="btn primary" type="submit">Add</button></div>
+  </form>
+</div>
 <div class="overlay" id="adminMenu" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
     <div class="sheet-head"><h2 id="adminTitle">Admin</h2><button class="btn ghost" type="button" data-close="adminMenu" aria-label="Close">✕</button></div>
@@ -1581,6 +1597,7 @@ $("#currency").onchange = e => saveSettings({currency:e.target.value});
 /* app versions, newest first: major.minor.patch
    major = a change in how the app works or stores data, minor = new features, patch = fixes and small tweaks */
 const REVISIONS = [
+  {v:"2.14.0", date:"23 Nov 2026", items:["Add cash, Venmo and other payments without a statement, money out or money in (e.g. a Marketplace sale)"]},
   {v:"2.13.2", date:"19 Nov 2026", items:["Removed Claude-only features the hosted app never used","Removed finished one-time data migrations"]},
   {v:"2.13.1", date:"19 Nov 2026", items:["Monthly chart shows the total on every bar","Dashed monthly-average line when one category is shown"]},
   {v:"2.13.0", date:"19 Nov 2026", items:["Compare months: spend per category in two months, side by side","Admin can change a transaction's description","Count a transaction in a different month (e.g. a bill paid in October for September)"]},
@@ -1940,10 +1957,43 @@ $("#exportBtn").onclick = () => {
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download = name; a.click();
 };
 
+/* ---------- cash, Venmo and other payments without a statement ---------- */
+let addDir = "out";
+function setAddDir(dir){
+  addDir = dir;
+  [...$("#addDir").children].forEach(x => x.classList.toggle("on", x.dataset.v === dir));
+  $("#addCat").value = dir === "in" ? "Income" : "Misc.";
+}
+$("#addBtn").onclick = () => {
+  $("#addForm").reset();
+  $("#addDate").value = new Date().toISOString().slice(0,10);
+  $("#addCat").innerHTML = catOptions("Misc.");
+  setAddDir("out");
+  $("#adder").hidden = false; $("#addDesc").focus();
+};
+$("#addDir").onclick = e => { const b = e.target.closest("button"); if(b) setAddDir(b.dataset.v); };
+/* suggest a category from the description, like an import would */
+$("#addDesc").addEventListener("input", e => {
+  const c = ruleCat({s: e.target.value}) || builtinCat(e.target.value, addDir === "in" ? -1 : 1);
+  if(c && CAT_KIND[c]) $("#addCat").value = c;
+});
+$("#addForm").onsubmit = e => {
+  e.preventDefault();
+  const amt = Math.round(parseFloat($("#addAmt").value) * 100) / 100, d = $("#addDate").value, desc = $("#addDesc").value.trim();
+  if(!(amt > 0) || !isYmd(d) || !desc) return;
+  const acct = $("#addAcct").value.trim() || "Cash", cat = $("#addCat").value;
+  const t = withAutoCat({id: rid(), d, s: desc, a: addDir === "in" ? -amt : amt});
+  t.acct = acct; if(cat !== t.ac) t.c = cat;
+  const doc = structuredClone(S.docs.manual || {kind:"import", name:"Added by hand", account:"Cash", createdAt:new Date().toISOString(), txns:[]});
+  doc.txns.push(t); putDoc("manual", doc);
+  $("#adder").hidden = true;
+  toast(`Added ${money(amt, true)} ${addDir === "in" ? "received" : "spent"} · ${acct} · ${catLabel(cat)}.`);
+};
+
 /* ---------- overlays ---------- */
 document.addEventListener("click", e => { const c = e.target.closest("[data-close]"); if(c) $("#"+c.dataset.close).hidden = true; });
-document.addEventListener("keydown", e => { if(e.key==="Escape"){ $("#importer").hidden = true; $("#undoAsk").hidden = true; $("#adminMenu").hidden = true; } });
-[$("#importer"), $("#undoAsk"), $("#adminMenu")].forEach(o => o.addEventListener("mousedown", e => { if(e.target===o) o.hidden = true; }));
+document.addEventListener("keydown", e => { if(e.key==="Escape"){ $("#importer").hidden = true; $("#undoAsk").hidden = true; $("#adminMenu").hidden = true; $("#adder").hidden = true; } });
+[$("#importer"), $("#undoAsk"), $("#adminMenu"), $("#adder")].forEach(o => o.addEventListener("mousedown", e => { if(e.target===o) o.hidden = true; }));
 $("#uploadBtn").onclick = $("#bannerUpload").onclick = () => { $("#importer").hidden = false; };
 
 /* ---------- import: files ---------- */
